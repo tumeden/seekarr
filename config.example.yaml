@@ -1,7 +1,5 @@
 app:
   db_path: "./state/seekarr.db"
-  # Hard global cap per run (across all instances).
-  max_actions_per_sync: 10
   request_timeout_seconds: 30
   verify_ssl: true
   log_level: INFO

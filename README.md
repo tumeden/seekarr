@@ -121,7 +121,6 @@ If you run the worker as a service, you usually want the Web UI to be monitor-on
 
 App defaults (`app:`):
 - `db_path` (default `./state/seekarr.db`)
-- `max_actions_per_sync` (hard global cap per cycle, across instances)
 - `request_timeout_seconds`, `verify_ssl`, `log_level`
 - Defaults used when instances do not override: `item_retry_hours`, `min_hours_after_release`, `quiet_hours_start`, `quiet_hours_end`, `min_seconds_between_actions`, `rate_window_minutes`, `rate_cap_per_instance`, `max_missing_actions_per_instance_per_sync`, `max_cutoff_actions_per_instance_per_sync`
 

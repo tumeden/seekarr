@@ -1,6 +1,7 @@
 import logging
 import time
 import random
+import threading
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import Callable, Any
@@ -116,6 +117,24 @@ class Engine:
         self.config = config
         self.logger = logger
         self.store = StateStore(config.app.db_path)
+        # Shared pacing across instances (Radarr + Sonarr). External schedulers already
+        # serialize runs with a global lock, but this ensures actions can't bunch up
+        # when due instances run back-to-back.
+        self._pacer_lock = threading.Lock()
+        self._last_action_at = 0.0  # time.monotonic()
+
+    def _wait_pace(self, seconds: int) -> None:
+        if int(seconds) <= 0:
+            return
+        with self._pacer_lock:
+            now = time.monotonic()
+            wait = (self._last_action_at + float(seconds)) - now
+            if wait > 0:
+                time.sleep(wait)
+
+    def _mark_action(self) -> None:
+        with self._pacer_lock:
+            self._last_action_at = time.monotonic()
 
     def _find_instance(self, app_type: str, instance_id: int) -> ArrSyncInstanceConfig | None:
         if app_type == "radarr":
@@ -411,10 +430,7 @@ class Engine:
                 if getattr(instance, "max_cutoff_actions_per_instance_per_sync", None) is not None
                 else getattr(self.config.app, "max_cutoff_actions_per_instance_per_sync", 0)
             )
-            # Legacy safety cap (pre-split). If configured lower than the split sum, we treat the split
-            # caps as authoritative so the UI values do what the user expects.
-            # Legacy total cap removed: split caps are authoritative.
-            legacy_total_cap = missing_cap + cutoff_cap
+            # Split caps are authoritative (missing vs upgrades).
 
             triggered_missing = 0
             triggered_cutoff = 0
@@ -428,10 +444,6 @@ class Engine:
                 if cap <= 0:
                     return
                 for it in items:
-                    if stats.actions_triggered >= self.config.app.max_actions_per_sync:
-                        return
-                    if (triggered_missing + triggered_cutoff) >= legacy_total_cap > 0:
-                        return
                     if kind == "missing" and triggered_missing >= cap:
                         return
                     if kind == "cutoff" and triggered_cutoff >= cap:
@@ -445,6 +457,7 @@ class Engine:
                         rate_window_minutes=rate_window_minutes,
                         rate_cap=rate_cap,
                         min_hours_after_release=effective_min_hours_after_release,
+                        pace_seconds=effective_between_actions,
                         wanted_item=it,
                         client=client,
                         triggered_items=triggered_items,
@@ -456,8 +469,7 @@ class Engine:
                             triggered_missing += 1
                         else:
                             triggered_cutoff += 1
-                        if effective_between_actions > 0:
-                            time.sleep(effective_between_actions)
+                        # Pacing is enforced inside the handler so it's shared across instances.
 
             if app_type == "sonarr" and missing_items and missing_cap > 0 and sonarr_missing_mode in ("season_packs", "shows"):
                 if sonarr_missing_mode == "season_packs":
@@ -524,10 +536,6 @@ class Engine:
 
                         grouped.sort(key=_group_sort_key, reverse=(search_order == "newest"))
                     for (sid, sn), eps in grouped:
-                        if stats.actions_triggered >= self.config.app.max_actions_per_sync:
-                            break
-                        if (triggered_missing + triggered_cutoff) >= legacy_total_cap > 0:
-                            break
                         if triggered_missing >= missing_cap:
                             break
                         before = stats.actions_triggered
@@ -537,6 +545,7 @@ class Engine:
                             rate_window_minutes=rate_window_minutes,
                             rate_cap=rate_cap,
                             min_hours_after_release=effective_min_hours_after_release,
+                            pace_seconds=effective_between_actions,
                             series_id=sid,
                             series_title=str(getattr(eps[0], "series_title", "") or ""),
                             season_number=sn,
@@ -548,8 +557,7 @@ class Engine:
                         )
                         if stats.actions_triggered > before:
                             triggered_missing += 1
-                            if effective_between_actions > 0:
-                                time.sleep(effective_between_actions)
+                            # Pacing is enforced inside the handler so it's shared across instances.
                 else:
                     # Group by show and trigger EpisodeSearch for all eligible missing episodes in that show.
                     shows: dict[int, list[Any]] = {}
@@ -607,10 +615,6 @@ class Engine:
 
                         grouped.sort(key=_show_sort_key, reverse=(search_order == "newest"))
                     for sid, eps in grouped:
-                        if stats.actions_triggered >= self.config.app.max_actions_per_sync:
-                            break
-                        if (triggered_missing + triggered_cutoff) >= legacy_total_cap > 0:
-                            break
                         if triggered_missing >= missing_cap:
                             break
                         before = stats.actions_triggered
@@ -620,6 +624,7 @@ class Engine:
                             rate_window_minutes=rate_window_minutes,
                             rate_cap=rate_cap,
                             min_hours_after_release=effective_min_hours_after_release,
+                            pace_seconds=effective_between_actions,
                             series_id=sid,
                             series_title=str(getattr(eps[0], "series_title", "") or ""),
                             episode_ids=[int(getattr(e, "episode_id", 0) or 0) for e in eps if int(getattr(e, "episode_id", 0) or 0) > 0],
@@ -631,8 +636,7 @@ class Engine:
                         )
                         if stats.actions_triggered > before:
                             triggered_missing += 1
-                            if effective_between_actions > 0:
-                                time.sleep(effective_between_actions)
+                            # Pacing is enforced inside the handler so it's shared across instances.
             else:
                 _process(missing_items, missing_cap, "missing")
             _process(cutoff_items, cutoff_cap, "cutoff")
@@ -680,6 +684,7 @@ class Engine:
         rate_window_minutes: int,
         rate_cap: int,
         min_hours_after_release: int,
+        pace_seconds: int,
         wanted_item,
         client: ArrClient,
         triggered_items: set[str],
@@ -755,6 +760,9 @@ class Engine:
                 )
             return
 
+        # Shared pacing across instances: wait right before sending a trigger.
+        self._wait_pace(pace_seconds)
+
         if app_type == "radarr":
             success = client.trigger_movie_search(wanted_item.movie_id)
             title = wanted_item.title
@@ -763,6 +771,7 @@ class Engine:
             title = f"{wanted_item.series_title} S{wanted_item.season_number:02d}E{wanted_item.episode_number:02d}"
 
         if success:
+            self._mark_action()
             stats.actions_triggered += 1
             triggered_items.add(item_key)
             self.store.mark_item_action(app_type, instance.instance_id, item_key, "", title)
@@ -798,6 +807,7 @@ class Engine:
         rate_window_minutes: int,
         rate_cap: int,
         min_hours_after_release: int,
+        pace_seconds: int,
         series_id: int,
         series_title: str,
         season_number: int,
@@ -885,9 +895,11 @@ class Engine:
                 )
             return
 
+        self._wait_pace(pace_seconds)
         success = client.trigger_season_search(series_id, season_number)
         title = f"{series_title} Season {int(season_number):02d} (Pack)"
         if success:
+            self._mark_action()
             stats.actions_triggered += 1
             triggered_items.add(item_key)
             self.store.mark_item_action("sonarr", instance.instance_id, item_key, "", title)
@@ -923,6 +935,7 @@ class Engine:
         rate_window_minutes: int,
         rate_cap: int,
         min_hours_after_release: int,
+        pace_seconds: int,
         series_id: int,
         series_title: str,
         episode_ids: list[int],
@@ -1010,9 +1023,11 @@ class Engine:
                 )
             return
 
+        self._wait_pace(pace_seconds)
         success = client.trigger_episode_search_bulk(episode_ids)
         title = f"{series_title} ({len(episode_ids)} eps) (Show Batch)"
         if success:
+            self._mark_action()
             stats.actions_triggered += 1
             triggered_items.add(item_key)
             self.store.mark_item_action("sonarr", instance.instance_id, item_key, "", title)

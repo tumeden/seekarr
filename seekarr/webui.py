@@ -687,24 +687,6 @@ def create_app(config_path: str) -> Flask:
       </section>
 
       <section class="content-section" id="section-settings">
-        <div class="cards-grid settings-grid">
-          <div class="card">
-            <h3>Global</h3>
-            <div class="subline">Global caps and timeouts. Most knobs are configured per instance below.</div>
-            <div class="two-col" style="margin-top:10px;">
-              <div class="field">
-                <div class="label">Max Actions Per Sync</div>
-                <input class="cfg" id="s_max_actions" type="number" min="1"/>
-              </div>
-              <div class="field"></div>
-            </div>
-            <div class="field" style="margin-top:10px;">
-              <div class="label">Request Timeout (sec)</div>
-              <input class="cfg" id="s_timeout" type="number" min="5"/>
-            </div>
-          </div>
-        </div>
-
         <div class="card" style="margin-top:12px;">
           <h3>Instances</h3>
           <div class="subline">API keys are not editable here.</div>
@@ -1021,9 +1003,6 @@ def create_app(config_path: str) -> Flask:
     async function loadSettings() {
       const r = await fetch('/api/settings', { cache:'no-store' });
       const data = await r.json();
-      const app = data.app || {};
-      document.getElementById('s_max_actions').value = app.max_actions_per_sync ?? '';
-      document.getElementById('s_timeout').value = app.request_timeout_seconds ?? '';
 
       const wrap = document.getElementById('settings-instance-cards');
       wrap.innerHTML = '';
@@ -1170,10 +1149,6 @@ def create_app(config_path: str) -> Flask:
       });
 
       const payload = {
-        app: {
-          max_actions_per_sync: Number(document.getElementById('s_max_actions').value || 0),
-          request_timeout_seconds: Number(document.getElementById('s_timeout').value || 0),
-        },
         instances,
       };
 
@@ -1251,47 +1226,18 @@ def create_app(config_path: str) -> Flask:
     @app.get("/api/settings")
     def get_settings() -> Any:
         cfg = _get_config()
-        return jsonify(
-            {
-                "app": {
-                    "max_actions_per_sync": cfg.app.max_actions_per_sync,
-                    "request_timeout_seconds": cfg.app.request_timeout_seconds,
-                },
-                "instances": _config_view(cfg).get("instances", []),
-            }
-        )
+        return jsonify({"instances": _config_view(cfg).get("instances", [])})
 
     @app.post("/api/settings")
     def save_settings() -> Any:
         payload = request.get_json(silent=True) or {}
-        app_in = payload.get("app") if isinstance(payload.get("app"), dict) else {}
         inst_in = payload.get("instances") if isinstance(payload.get("instances"), list) else []
 
         try:
             raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8")) or {}
             if not isinstance(raw, dict):
                 raw = {}
-            raw_app = raw.get("app") if isinstance(raw.get("app"), dict) else {}
-
-            def _set_int(key: str, minv: int, default: int) -> None:
-                v = app_in.get(key, None)
-                if v is None:
-                    return
-                try:
-                    raw_app[key] = max(minv, int(v))
-                except (TypeError, ValueError):
-                    raw_app[key] = default
-
-            def _set_str(key: str, default: str = "") -> None:
-                v = app_in.get(key, None)
-                if v is None:
-                    return
-                raw_app[key] = str(v).strip() if str(v).strip() else default
-
-            _set_int("max_actions_per_sync", 1, 10)
-            _set_int("request_timeout_seconds", 5, 30)
-
-            raw["app"] = raw_app
+            # App-level settings are intentionally not editable via UI (instances only).
 
             # Instances: update only fields that are safe to edit via UI (no api_key writing).
             def _update_instances(section_key: str, arr_key: str, app_name: str) -> None:

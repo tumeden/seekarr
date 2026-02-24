@@ -1,0 +1,404 @@
+import json
+import sqlite3
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class StateStore:
+    def __init__(self, db_path: str) -> None:
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self) -> None:
+        with self._connect() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS processed_guid (
+                    hunt_type TEXT NOT NULL,
+                    instance_id INTEGER NOT NULL,
+                    guid TEXT NOT NULL,
+                    processed_at TEXT NOT NULL,
+                    PRIMARY KEY (hunt_type, instance_id, guid)
+                );
+                CREATE TABLE IF NOT EXISTS item_action (
+                    hunt_type TEXT NOT NULL,
+                    instance_id INTEGER NOT NULL,
+                    item_key TEXT NOT NULL,
+                    last_action_at TEXT NOT NULL,
+                    last_guid TEXT,
+                    title TEXT,
+                    PRIMARY KEY (hunt_type, instance_id, item_key)
+                );
+                CREATE TABLE IF NOT EXISTS cycle_run (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    status TEXT NOT NULL,
+                    stats_json TEXT
+                );
+                CREATE TABLE IF NOT EXISTS sync_status (
+                    hunt_type TEXT NOT NULL,
+                    instance_id INTEGER NOT NULL,
+                    last_sync_time TEXT,
+                    next_sync_time TEXT,
+                    PRIMARY KEY (hunt_type, instance_id)
+                );
+                CREATE TABLE IF NOT EXISTS search_event (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    hunt_type TEXT NOT NULL,
+                    instance_id INTEGER NOT NULL,
+                    occurred_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_search_event_lookup
+                ON search_event(hunt_type, instance_id, occurred_at);
+                CREATE TABLE IF NOT EXISTS search_action (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    hunt_type TEXT NOT NULL,
+                    instance_id INTEGER NOT NULL,
+                    instance_name TEXT,
+                    item_key TEXT,
+                    title TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_search_action_lookup
+                ON search_action(hunt_type, instance_id, id DESC);
+                CREATE TABLE IF NOT EXISTS instance_run (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cycle_run_id INTEGER NOT NULL,
+                    hunt_type TEXT NOT NULL,
+                    instance_id INTEGER NOT NULL,
+                    instance_name TEXT,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    status TEXT NOT NULL,
+                    stats_json TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_instance_run_lookup
+                ON instance_run(hunt_type, instance_id, id DESC);
+                CREATE TABLE IF NOT EXISTS scheduler_heartbeat (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    updated_at TEXT NOT NULL
+                );
+                """
+            )
+
+    def is_guid_processed(self, hunt_type: str, instance_id: int, guid: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM processed_guid WHERE hunt_type = ? AND instance_id = ? AND guid = ?",
+                (hunt_type, instance_id, guid),
+            ).fetchone()
+        return row is not None
+
+    def mark_guid_processed(self, hunt_type: str, instance_id: int, guid: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO processed_guid(hunt_type, instance_id, guid, processed_at)
+                VALUES(?, ?, ?, ?)
+                ON CONFLICT(hunt_type, instance_id, guid) DO UPDATE SET processed_at=excluded.processed_at
+                """,
+                (hunt_type, instance_id, guid, _utc_now()),
+            )
+
+    def prune_old_guids(self, ttl_hours: int) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=ttl_hours)
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM processed_guid WHERE processed_at < ?",
+                (cutoff.isoformat(),),
+            )
+            return cur.rowcount
+
+    def item_on_cooldown(self, hunt_type: str, instance_id: int, item_key: str, retry_hours: int) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT last_action_at FROM item_action WHERE hunt_type = ? AND instance_id = ? AND item_key = ?",
+                (hunt_type, instance_id, item_key),
+            ).fetchone()
+        if row is None:
+            return False
+        try:
+            last = datetime.fromisoformat(row["last_action_at"])
+        except ValueError:
+            return False
+        return datetime.now(timezone.utc) < (last + timedelta(hours=retry_hours))
+
+    def mark_item_action(self, hunt_type: str, instance_id: int, item_key: str, guid: str, title: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO item_action(hunt_type, instance_id, item_key, last_action_at, last_guid, title)
+                VALUES(?, ?, ?, ?, ?, ?)
+                ON CONFLICT(hunt_type, instance_id, item_key) DO UPDATE SET
+                    last_action_at=excluded.last_action_at,
+                    last_guid=excluded.last_guid,
+                    title=excluded.title
+                """,
+                (hunt_type, instance_id, item_key, _utc_now(), guid, title),
+            )
+
+    def get_next_sync_time(self, hunt_type: str, instance_id: int) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT next_sync_time FROM sync_status WHERE hunt_type = ? AND instance_id = ?",
+                (hunt_type, instance_id),
+            ).fetchone()
+        return str(row["next_sync_time"]) if row and row["next_sync_time"] else None
+
+    def upsert_sync_status(self, hunt_type: str, instance_id: int, last_sync_time: str, next_sync_time: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO sync_status(hunt_type, instance_id, last_sync_time, next_sync_time)
+                VALUES(?, ?, ?, ?)
+                ON CONFLICT(hunt_type, instance_id) DO UPDATE SET
+                    last_sync_time=excluded.last_sync_time,
+                    next_sync_time=excluded.next_sync_time
+                """,
+                (hunt_type, instance_id, last_sync_time, next_sync_time),
+            )
+
+    def set_next_sync_time(self, hunt_type: str, instance_id: int, next_sync_time: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO sync_status(hunt_type, instance_id, next_sync_time)
+                VALUES(?, ?, ?)
+                ON CONFLICT(hunt_type, instance_id) DO UPDATE SET
+                    next_sync_time=excluded.next_sync_time
+                """,
+                (hunt_type, instance_id, next_sync_time),
+            )
+
+    def record_search_event(self, hunt_type: str, instance_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO search_event(hunt_type, instance_id, occurred_at) VALUES(?, ?, ?)",
+                (hunt_type, instance_id, _utc_now()),
+            )
+
+    def record_search_action(
+        self,
+        hunt_type: str,
+        instance_id: int,
+        instance_name: str,
+        item_key: str,
+        title: str,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO search_action(hunt_type, instance_id, instance_name, item_key, title, occurred_at)
+                VALUES(?, ?, ?, ?, ?, ?)
+                """,
+                (str(hunt_type), int(instance_id), str(instance_name or ""), str(item_key or ""), str(title or ""), _utc_now()),
+            )
+
+    def get_recent_search_actions(self, hunt_type: str, instance_id: int, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, hunt_type, instance_id, instance_name, item_key, title, occurred_at
+                FROM search_action
+                WHERE hunt_type = ? AND instance_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (str(hunt_type), int(instance_id), max(1, int(limit))),
+            ).fetchall()
+        return [
+            {
+                "id": int(r["id"]),
+                "app_type": r["hunt_type"],
+                "instance_id": int(r["instance_id"]),
+                "instance_name": r["instance_name"],
+                "item_key": r["item_key"],
+                "title": r["title"],
+                "occurred_at": r["occurred_at"],
+            }
+            for r in rows
+        ]
+
+    def count_search_events_since(self, hunt_type: str, instance_id: int, since_iso: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS c
+                FROM search_event
+                WHERE hunt_type = ? AND instance_id = ? AND occurred_at >= ?
+                """,
+                (hunt_type, instance_id, since_iso),
+            ).fetchone()
+        return int(row["c"] or 0) if row else 0
+
+    def set_scheduler_heartbeat(self) -> None:
+        now = _utc_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO scheduler_heartbeat(id, updated_at)
+                VALUES(1, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    updated_at=excluded.updated_at
+                """,
+                (now,),
+            )
+
+    def get_scheduler_heartbeat(self) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT updated_at FROM scheduler_heartbeat WHERE id = 1"
+            ).fetchone()
+        if not row:
+            return None
+        updated_at = row["updated_at"]
+        return str(updated_at) if updated_at else None
+
+    def start_run(self) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO cycle_run(started_at, status) VALUES(?, ?)",
+                (_utc_now(), "running"),
+            )
+            return int(cur.lastrowid)
+
+    def finish_run(self, run_id: int, status: str, stats: dict[str, Any]) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE cycle_run
+                SET finished_at = ?, status = ?, stats_json = ?
+                WHERE id = ?
+                """,
+                (_utc_now(), status, json.dumps(stats), run_id),
+            )
+
+    def get_recent_runs(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, started_at, finished_at, status, stats_json
+                FROM cycle_run
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (max(1, int(limit)),),
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            stats = {}
+            try:
+                stats = json.loads(row["stats_json"] or "{}")
+            except (TypeError, ValueError):
+                stats = {}
+            out.append(
+                {
+                    "id": int(row["id"]),
+                    "started_at": row["started_at"],
+                    "finished_at": row["finished_at"],
+                    "status": row["status"],
+                    "stats": stats,
+                }
+            )
+        return out
+
+    def record_instance_run(
+        self,
+        cycle_run_id: int,
+        hunt_type: str,
+        instance_id: int,
+        instance_name: str,
+        started_at: str,
+        finished_at: str,
+        status: str,
+        stats: dict[str, Any],
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO instance_run(
+                    cycle_run_id, hunt_type, instance_id, instance_name,
+                    started_at, finished_at, status, stats_json
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(cycle_run_id),
+                    str(hunt_type),
+                    int(instance_id),
+                    str(instance_name or ""),
+                    str(started_at),
+                    str(finished_at),
+                    str(status),
+                    json.dumps(stats or {}),
+                ),
+            )
+
+    def get_recent_instance_runs(self, hunt_type: str, instance_id: int, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, cycle_run_id, hunt_type, instance_id, instance_name, started_at, finished_at, status, stats_json
+                FROM instance_run
+                WHERE hunt_type = ? AND instance_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (str(hunt_type), int(instance_id), max(1, int(limit))),
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            stats = {}
+            try:
+                stats = json.loads(row["stats_json"] or "{}")
+            except (TypeError, ValueError):
+                stats = {}
+            out.append(
+                {
+                    "id": int(row["id"]),
+                    "cycle_run_id": int(row["cycle_run_id"]),
+                    "app_type": row["hunt_type"],
+                    "instance_id": int(row["instance_id"]),
+                    "instance_name": row["instance_name"],
+                    "started_at": row["started_at"],
+                    "finished_at": row["finished_at"],
+                    "status": row["status"],
+                    "stats": stats,
+                }
+            )
+        return out
+
+    def get_last_instance_run(self, hunt_type: str, instance_id: int) -> dict[str, Any] | None:
+        rows = self.get_recent_instance_runs(hunt_type, instance_id, limit=1)
+        return rows[0] if rows else None
+
+    def get_sync_statuses(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT hunt_type, instance_id, last_sync_time, next_sync_time
+                FROM sync_status
+                ORDER BY hunt_type, instance_id
+                """
+            ).fetchall()
+        return [
+            {
+                "app_type": row["hunt_type"],
+                "instance_id": int(row["instance_id"]),
+                "last_sync_time": row["last_sync_time"],
+                "next_sync_time": row["next_sync_time"],
+            }
+            for row in rows
+        ]

@@ -1,0 +1,24 @@
+services:
+  webui:
+    build: .
+    container_name: seekarr
+    command: ["python", "webui_main.py", "--config", "/config/config.yaml", "--host", "0.0.0.0", "--port", "8788", "--allow-public"]
+    restart: unless-stopped
+    environment:
+      - WEBUI_AUTORUN_DEFAULT=1
+    ports:
+      - "127.0.0.1:8788:8788"
+    volumes:
+      - ./config:/config:ro
+      - ./data:/data
+
+  console:
+    build: .
+    container_name: seekarr-console
+    command: ["python", "main.py", "--config", "/config/config.yaml"]
+    restart: unless-stopped
+    volumes:
+      - ./config:/config:ro
+      - ./data:/data
+    profiles:
+      - console

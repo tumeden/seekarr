@@ -1,0 +1,59 @@
+app:
+  db_path: "./state/seekarr.db"
+  # Hard global cap per run (across all instances).
+  max_actions_per_sync: 10
+  request_timeout_seconds: 30
+  verify_ssl: true
+  log_level: INFO
+
+radarr:
+  instances:
+    - instance_id: 1
+      instance_name: Radarr Main
+      enabled: true
+      interval_minutes: 15
+      # Search types:
+      # - missing: new content not yet grabbed
+      # - cutoff_unmet: upgrades until your quality cutoff is met
+      search_missing: true
+      search_cutoff_unmet: true
+      # Search order: newest (default), random, oldest
+      # Smart mode: recent (today/yesterday) first, then random, then oldest last.
+      search_order: smart
+      # Per-instance behavior/limits (defaults shown).
+      quiet_hours_start: "23:00"
+      quiet_hours_end: "06:00"
+      min_hours_after_release: 8
+      min_seconds_between_actions: 2
+      max_missing_actions_per_instance_per_sync: 5
+      max_cutoff_actions_per_instance_per_sync: 1
+      item_retry_hours: 72
+      rate_window_minutes: 60
+      rate_cap: 25
+      radarr:
+        url: http://localhost:7878
+        api_key: "${RADARR_API_KEY_1}"
+
+sonarr:
+  instances:
+    - instance_id: 1
+      instance_name: Sonarr Main
+      enabled: true
+      interval_minutes: 15
+      search_missing: true
+      search_cutoff_unmet: true
+      search_order: smart
+      quiet_hours_start: "23:00"
+      quiet_hours_end: "06:00"
+      min_hours_after_release: 8
+      min_seconds_between_actions: 2
+      max_missing_actions_per_instance_per_sync: 5
+      max_cutoff_actions_per_instance_per_sync: 1
+      # Sonarr missing modes: season_packs (default), shows, episodes
+      sonarr_missing_mode: season_packs
+      item_retry_hours: 72
+      rate_window_minutes: 60
+      rate_cap: 25
+      sonarr:
+        url: http://localhost:8989
+        api_key: "${SONARR_API_KEY_1}"

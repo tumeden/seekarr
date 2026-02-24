@@ -1,0 +1,39 @@
+# Secrets / local config
+.env
+.env.*
+config.yaml
+
+# Runtime state / data
+state/
+data/
+config/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Python caches / builds
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+
+# Legacy local env scripts (not used by Seekarr)
+set-env*.ps1

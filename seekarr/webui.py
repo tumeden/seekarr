@@ -351,19 +351,7 @@ def create_app(config_path: str) -> Flask:
       background: rgba(249, 115, 22, 0.18);
     }
     .main { min-width: 0; display: flex; flex-direction: column; }
-    .topbar {
-      height: 46px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 16px;
-      background: linear-gradient(180deg, rgba(16, 17, 19, 0.98), rgba(10, 10, 11, 0.98));
-      border-bottom: 1px solid rgba(249, 115, 22, 0.14);
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
-    .topbar-title { font-size: 14px; font-weight: 600; color: var(--text-secondary); }
+    
     .chip {
       display: inline-flex;
       align-items: center;
@@ -607,10 +595,16 @@ def create_app(config_path: str) -> Flask:
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: .04em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     input.cfg, select.cfg {
       width: 100%;
       padding: 9px 10px;
+      height: 38px;
+      line-height: 18px;
+      font: inherit;
       border-radius: 10px;
       border: 1px solid rgba(255, 255, 255, 0.10);
       background: rgba(15, 23, 42, 0.55);
@@ -632,7 +626,10 @@ def create_app(config_path: str) -> Flask:
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 10px;
+      align-items: start;
     }
+    /* In a two-column row, both columns should align to the same top edge. */
+    .two-col .field { margin-top: 0; }
     @media (max-width: 900px) {
       .app { grid-template-columns: 1fr; }
       .sidebar { display: none; }
@@ -652,10 +649,7 @@ def create_app(config_path: str) -> Flask:
       <a class="nav-item" data-section="settings" href="#">Settings</a>
     </aside>
     <main class="main">
-      <header class="topbar">
-        <div class="topbar-title">Automation Console</div>
-        <div class="chip" id="server-time">UTC --</div>
-      </header>
+      
       <section class="content-section active" id="section-dashboard">
         <div class="actions">
           <label class="chip" style="gap:8px; cursor:pointer;">
@@ -842,7 +836,7 @@ def create_app(config_path: str) -> Flask:
     async function refresh() {
       const r = await fetch('/api/status');
       const data = await r.json();
-      document.getElementById('server-time').textContent = `UTC ${fmtUtc(data.server_time_utc) || '--'}`;
+      
       const rs = data.run_state || {};
       const autorunToggle = document.getElementById('autorun-toggle');
       if (autorunToggle && autorunToggle.checked !== !!rs.autorun_enabled) {

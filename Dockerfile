@@ -14,5 +14,9 @@ COPY . /app
 RUN useradd -u 10001 -m appuser && chown -R appuser:appuser /app
 USER appuser
 
-# Default: run the Web UI (includes auto-run logic). Mount /config (config.yaml + optional .env) and /data (sqlite db).
-CMD ["python", "webui_main.py", "--config", "/config/config.yaml", "--host", "0.0.0.0", "--port", "8788", "--allow-public"]
+# Default: run the Web UI (includes auto-run logic). Mount /data for persistence:
+# - /data/config.yaml is auto-created on first run if missing
+# - /data/seekarr.db stores state
+# - /data/seekarr.masterkey stores the encryption key for stored Arr API keys
+VOLUME ["/data"]
+CMD ["python", "webui_main.py", "--config", "/data/config.yaml", "--host", "0.0.0.0", "--port", "8788", "--allow-public"]

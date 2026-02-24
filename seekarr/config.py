@@ -117,8 +117,98 @@ def _load_dotenv_if_present(config_path: Path) -> None:
             return
 
 
+def _is_docker_data_path(config_path: Path) -> bool:
+    # Heuristic: when running in Docker, we default to /data/config.yaml.
+    try:
+        s = config_path.as_posix()
+    except Exception:
+        s = str(config_path).replace("\\", "/")
+    return s.startswith("/data/") or s.endswith("/data/config.yaml")
+
+
+def _ensure_config_exists(config_path: Path) -> None:
+    if config_path.exists():
+        return
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Prefer the repo's config.example.yaml when available (Docker image includes it).
+    template_path = Path(__file__).resolve().parents[1] / "config.example.yaml"
+    raw: dict[str, Any] = {}
+    if template_path.exists():
+        try:
+            raw_loaded = yaml.safe_load(template_path.read_text(encoding="utf-8")) or {}
+            raw = raw_loaded if isinstance(raw_loaded, dict) else {}
+        except OSError:
+            raw = {}
+
+    raw.setdefault("app", {})
+    if isinstance(raw.get("app"), dict):
+        raw["app"]["db_path"] = "/data/seekarr.db" if _is_docker_data_path(config_path) else "./state/seekarr.db"
+
+    # Write a usable default config even if the template couldn't be loaded.
+    if not raw:
+        raw = {
+            "app": {
+                "db_path": "/data/seekarr.db" if _is_docker_data_path(config_path) else "./state/seekarr.db",
+                "request_timeout_seconds": 30,
+                "verify_ssl": True,
+                "log_level": "INFO",
+            },
+            "radarr": {
+                "instances": [
+                    {
+                        "instance_id": 1,
+                        "instance_name": "Radarr Main",
+                        "enabled": True,
+                        "interval_minutes": 15,
+                        "search_missing": True,
+                        "search_cutoff_unmet": True,
+                        "search_order": "smart",
+                        "quiet_hours_start": "23:00",
+                        "quiet_hours_end": "06:00",
+                        "min_hours_after_release": 8,
+                        "min_seconds_between_actions": 2,
+                        "max_missing_actions_per_instance_per_sync": 5,
+                        "max_cutoff_actions_per_instance_per_sync": 1,
+                        "item_retry_hours": 72,
+                        "rate_window_minutes": 60,
+                        "rate_cap": 25,
+                        "radarr": {"url": "", "api_key": ""},
+                    }
+                ]
+            },
+            "sonarr": {
+                "instances": [
+                    {
+                        "instance_id": 1,
+                        "instance_name": "Sonarr Main",
+                        "enabled": True,
+                        "interval_minutes": 15,
+                        "search_missing": True,
+                        "search_cutoff_unmet": True,
+                        "search_order": "smart",
+                        "quiet_hours_start": "23:00",
+                        "quiet_hours_end": "06:00",
+                        "min_hours_after_release": 8,
+                        "min_seconds_between_actions": 2,
+                        "max_missing_actions_per_instance_per_sync": 5,
+                        "max_cutoff_actions_per_instance_per_sync": 1,
+                        "sonarr_missing_mode": "season_packs",
+                        "item_retry_hours": 72,
+                        "rate_window_minutes": 60,
+                        "rate_cap": 25,
+                        "sonarr": {"url": "", "api_key": ""},
+                    }
+                ]
+            },
+        }
+
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+
 def load_config(path: str) -> RuntimeConfig:
     config_path = Path(path).resolve()
+    _ensure_config_exists(config_path)
     _load_dotenv_if_present(config_path)
     with config_path.open("r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle) or {}

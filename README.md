@@ -72,21 +72,20 @@ services:
     image: tumeden/seekarr:latest
     container_name: seekarr
     restart: unless-stopped
-    command: ["python", "webui_main.py", "--config", "/config/config.yaml", "--host", "0.0.0.0", "--port", "8788", "--allow-public"]
+    command: ["python", "webui_main.py", "--config", "/data/config.yaml", "--host", "0.0.0.0", "--port", "8788", "--allow-public"]
     ports:
       - "127.0.0.1:8788:8788"
     environment:
       WEBUI_AUTORUN_DEFAULT: "1"
     volumes:
-      - ./config:/config
       - ./data:/data
 ```
 
 Notes:
-- Put `config.yaml` at `./config/config.yaml` and set `app.db_path: "/data/seekarr.db"` so the DB persists.
-- Persist `./data` (it contains `seekarr.db` and `seekarr.masterkey`).
+- Persist `./data` (it contains `config.yaml`, `seekarr.db`, and `seekarr.masterkey`).
+- Seekarr auto-creates `./data/config.yaml` on first start if it is missing.
 - First load prompts you to set a Web UI password (stored as a salted hash in SQLite).
-- Put keys/password in `./config/.env` only if you want to pre-seed them (optional):
+- Put keys/password in `./data/.env` only if you want to pre-seed them (optional):
 
 ```env
 SEEKARR_WEBUI_PASSWORD=change-me

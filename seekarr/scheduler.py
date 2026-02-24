@@ -6,11 +6,12 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .config import load_config
 from .arr import ArrRequestError
+from .config import load_config
 from .engine import Engine
 from .logging_utils import setup_logging
 from .state import StateStore
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Seekarr")

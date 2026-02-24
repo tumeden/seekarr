@@ -3,15 +3,15 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml
 from flask import Flask, jsonify, request
 
-from .config import RuntimeConfig, load_config
 from .arr import ArrRequestError
+from .config import RuntimeConfig, load_config
 from .engine import Engine
 from .logging_utils import setup_logging
 from .state import StateStore
@@ -168,10 +168,9 @@ def create_app(config_path: str) -> Flask:
                 run_state["actions_skipped_rate_limit"] = int(evt.get("actions_skipped_rate_limit") or 0)
             elif evt.get("type") == "instance_finished":
                 # Clear "active" if we just finished the active instance.
-                if (
-                    run_state.get("active_app_type") == evt.get("app_type")
-                    and run_state.get("active_instance_id") == evt.get("instance_id")
-                ):
+                if run_state.get("active_app_type") == evt.get("app_type") and run_state.get(
+                    "active_instance_id"
+                ) == evt.get("instance_id"):
                     run_state["active_app_type"] = None
                     run_state["active_instance_id"] = None
                     run_state["active_instance_name"] = None
@@ -260,7 +259,9 @@ def create_app(config_path: str) -> Flask:
                 try:
                     with run_state_lock:
                         run_state["autorun_last_run_started"] = datetime.now(timezone.utc).isoformat()
-                    engine.run_instance(app_type=app_type, instance_id=instance_id, force=False, progress_cb=_progress_cb)
+                    engine.run_instance(
+                        app_type=app_type, instance_id=instance_id, force=False, progress_cb=_progress_cb
+                    )
                 finally:
                     run_lock.release()
             except ArrRequestError as exc:
@@ -1205,9 +1206,13 @@ def create_app(config_path: str) -> Flask:
 
         search_history: dict[str, Any] = {}
         for inst in cfg.radarr_instances:
-            search_history[f"radarr:{inst.instance_id}"] = store.get_recent_search_actions("radarr", inst.instance_id, 50)
+            search_history[f"radarr:{inst.instance_id}"] = store.get_recent_search_actions(
+                "radarr", inst.instance_id, 50
+            )
         for inst in cfg.sonarr_instances:
-            search_history[f"sonarr:{inst.instance_id}"] = store.get_recent_search_actions("sonarr", inst.instance_id, 50)
+            search_history[f"sonarr:{inst.instance_id}"] = store.get_recent_search_actions(
+                "sonarr", inst.instance_id, 50
+            )
 
         return jsonify(
             {
@@ -1237,7 +1242,9 @@ def create_app(config_path: str) -> Flask:
             raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8")) or {}
             if not isinstance(raw, dict):
                 raw = {}
-            # App-level settings are intentionally not editable via UI (instances only).
+            # App-level settings are intentionally not editable via UI (instances only),
+            # but we still read them for defaults when persisting per-instance fields.
+            raw_app = raw.get("app") if isinstance(raw.get("app"), dict) else {}
 
             # Instances: update only fields that are safe to edit via UI (no api_key writing).
             def _update_instances(section_key: str, arr_key: str, app_name: str) -> None:
@@ -1269,9 +1276,13 @@ def create_app(config_path: str) -> Flask:
                         continue
                     inst["enabled"] = bool(ui.get("enabled", inst.get("enabled", True)))
                     inst["search_missing"] = bool(ui.get("search_missing", inst.get("search_missing", True)))
-                    inst["search_cutoff_unmet"] = bool(ui.get("search_cutoff_unmet", inst.get("search_cutoff_unmet", True)))
+                    inst["search_cutoff_unmet"] = bool(
+                        ui.get("search_cutoff_unmet", inst.get("search_cutoff_unmet", True))
+                    )
                     if ui.get("search_order") is not None:
-                        inst["search_order"] = str(ui.get("search_order") or inst.get("search_order") or "newest").strip().lower()
+                        inst["search_order"] = (
+                            str(ui.get("search_order") or inst.get("search_order") or "newest").strip().lower()
+                        )
                     # Per-instance behavior/limits.
                     if ui.get("quiet_hours_start") is not None:
                         inst["quiet_hours_start"] = str(ui.get("quiet_hours_start") or "").strip()
@@ -1289,33 +1300,62 @@ def create_app(config_path: str) -> Flask:
                             pass
                     if ui.get("max_missing_actions_per_instance_per_sync") is not None:
                         try:
-                            inst["max_missing_actions_per_instance_per_sync"] = max(0, int(ui.get("max_missing_actions_per_instance_per_sync")))
+                            inst["max_missing_actions_per_instance_per_sync"] = max(
+                                0, int(ui.get("max_missing_actions_per_instance_per_sync"))
+                            )
                         except (TypeError, ValueError):
                             pass
                     if ui.get("max_cutoff_actions_per_instance_per_sync") is not None:
                         try:
-                            inst["max_cutoff_actions_per_instance_per_sync"] = max(0, int(ui.get("max_cutoff_actions_per_instance_per_sync")))
+                            inst["max_cutoff_actions_per_instance_per_sync"] = max(
+                                0, int(ui.get("max_cutoff_actions_per_instance_per_sync"))
+                            )
                         except (TypeError, ValueError):
                             pass
                     # Sonarr-only, but safe to persist in YAML for other apps (ignored by parser).
                     if ui.get("sonarr_missing_mode") is not None:
-                        inst["sonarr_missing_mode"] = str(ui.get("sonarr_missing_mode") or inst.get("sonarr_missing_mode") or "season_packs").strip().lower()
+                        inst["sonarr_missing_mode"] = (
+                            str(ui.get("sonarr_missing_mode") or inst.get("sonarr_missing_mode") or "season_packs")
+                            .strip()
+                            .lower()
+                        )
                     try:
                         interval = ui.get("interval_minutes")
                         inst["interval_minutes"] = max(1, int(interval or inst.get("interval_minutes") or 15))
                     except (TypeError, ValueError):
                         pass
                     try:
-                        inst["item_retry_hours"] = max(1, int(ui.get("item_retry_hours") or inst.get("item_retry_hours") or raw_app.get("item_retry_hours") or 72))
+                        inst["item_retry_hours"] = max(
+                            1,
+                            int(
+                                ui.get("item_retry_hours")
+                                or inst.get("item_retry_hours")
+                                or raw_app.get("item_retry_hours")
+                                or 72
+                            ),
+                        )
                     except (TypeError, ValueError):
                         pass
                     # Per-instance rate overrides.
                     try:
-                        inst["rate_window_minutes"] = max(1, int(ui.get("rate_window_minutes") or inst.get("rate_window_minutes") or raw_app.get("rate_window_minutes") or 60))
+                        inst["rate_window_minutes"] = max(
+                            1,
+                            int(
+                                ui.get("rate_window_minutes")
+                                or inst.get("rate_window_minutes")
+                                or raw_app.get("rate_window_minutes")
+                                or 60
+                            ),
+                        )
                     except (TypeError, ValueError):
                         pass
                     try:
-                        inst["rate_cap"] = max(1, int(ui.get("rate_cap") or inst.get("rate_cap") or raw_app.get("rate_cap_per_instance") or 25))
+                        inst["rate_cap"] = max(
+                            1,
+                            int(
+                                ui.get("rate_cap") or inst.get("rate_cap") or raw_app.get("rate_cap_per_instance") or 25
+                            ),
+                        )
                     except (TypeError, ValueError):
                         pass
 
@@ -1426,5 +1466,6 @@ def main() -> int:
     # Production default: use waitress (WSGI server). This avoids Flask's dev server warnings
     # and behaves more like a real deployment on Windows/Linux.
     from waitress import serve
+
     serve(app, host=args.host, port=args.port, threads=8)
     return 0

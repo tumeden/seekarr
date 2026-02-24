@@ -6,7 +6,6 @@ from typing import Any
 
 import yaml
 
-
 ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
@@ -74,6 +73,7 @@ class RuntimeConfig:
 
 def _expand_env(value: Any) -> Any:
     if isinstance(value, str):
+
         def repl(match: re.Match[str]) -> str:
             env_name = match.group(1)
             return os.getenv(env_name, "")
@@ -134,8 +134,12 @@ def load_config(path: str) -> RuntimeConfig:
         quiet_hours_end=_require_str(app_raw, "quiet_hours_end", "06:00"),
         # Per-run caps per instance, split by wanted kind.
         # This prevents "upgrade spam" when cutoff-unmet lists are huge.
-        max_missing_actions_per_instance_per_sync=max(0, int(app_raw.get("max_missing_actions_per_instance_per_sync", 5))),
-        max_cutoff_actions_per_instance_per_sync=max(0, int(app_raw.get("max_cutoff_actions_per_instance_per_sync", 1))),
+        max_missing_actions_per_instance_per_sync=max(
+            0, int(app_raw.get("max_missing_actions_per_instance_per_sync", 5))
+        ),
+        max_cutoff_actions_per_instance_per_sync=max(
+            0, int(app_raw.get("max_cutoff_actions_per_instance_per_sync", 1))
+        ),
         min_seconds_between_actions=max(0, int(app_raw.get("min_seconds_between_actions", 2))),
         rate_window_minutes=max(1, int(app_raw.get("rate_window_minutes", 30))),
         rate_cap_per_instance=max(1, int(app_raw.get("rate_cap_per_instance", 10))),
@@ -173,14 +177,10 @@ def load_config(path: str) -> RuntimeConfig:
                     search_cutoff_unmet=bool(row.get("search_cutoff_unmet", True)),
                     search_order=_require_str(row, "search_order", "smart").lower(),
                     quiet_hours_start=(
-                        _require_str(row, "quiet_hours_start", "")
-                        if row.get("quiet_hours_start") is not None
-                        else None
+                        _require_str(row, "quiet_hours_start", "") if row.get("quiet_hours_start") is not None else None
                     ),
                     quiet_hours_end=(
-                        _require_str(row, "quiet_hours_end", "")
-                        if row.get("quiet_hours_end") is not None
-                        else None
+                        _require_str(row, "quiet_hours_end", "") if row.get("quiet_hours_end") is not None else None
                     ),
                     min_hours_after_release=(
                         int(row.get("min_hours_after_release"))

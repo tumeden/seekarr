@@ -1,10 +1,10 @@
 import logging
-import time
 import random
 import threading
-from datetime import datetime, timedelta, timezone
+import time
 from dataclasses import dataclass
-from typing import Callable, Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable
 
 from .arr import (
     ArrClient,
@@ -193,6 +193,7 @@ class Engine:
             if progress_cb:
                 progress_cb({"type": "cycle_finished", "status": "error", "error": str(exc), "stats": stats.as_dict()})
             raise
+
     def _is_due(self, app_type: str, instance: ArrSyncInstanceConfig) -> bool:
         if not instance.enabled:
             return False
@@ -335,10 +336,12 @@ class Engine:
             # 3) within each group: newest (closest to release/air date) first
             # Items without a known date are processed last.
             if app_type == "radarr":
+
                 def _date_key(item) -> tuple[int, float]:
                     dt = _parse_arr_datetime_utc(getattr(item, "release_date_utc", None))
                     return (1, dt.timestamp()) if dt else (0, 0.0)
             else:
+
                 def _date_key(item) -> tuple[int, float]:
                     dt = _parse_arr_datetime_utc(getattr(item, "air_date_utc", None))
                     return (1, dt.timestamp()) if dt else (0, 0.0)
@@ -402,7 +405,7 @@ class Engine:
                 random.shuffle(missing_items)
                 random.shuffle(cutoff_items)
             else:
-                reverse = (search_order == "newest")
+                reverse = search_order == "newest"
                 missing_items.sort(key=_date_key, reverse=reverse)
                 cutoff_items.sort(key=_date_key, reverse=reverse)
             wanted = missing_items + cutoff_items
@@ -435,7 +438,9 @@ class Engine:
             triggered_missing = 0
             triggered_cutoff = 0
 
-            sonarr_missing_mode = str(getattr(instance, "sonarr_missing_mode", "season_packs") or "season_packs").strip().lower()
+            sonarr_missing_mode = (
+                str(getattr(instance, "sonarr_missing_mode", "season_packs") or "season_packs").strip().lower()
+            )
             if sonarr_missing_mode in ("seasons_packs", "seasonpacks", "seasons", "season"):
                 sonarr_missing_mode = "season_packs"
 
@@ -471,7 +476,12 @@ class Engine:
                             triggered_cutoff += 1
                         # Pacing is enforced inside the handler so it's shared across instances.
 
-            if app_type == "sonarr" and missing_items and missing_cap > 0 and sonarr_missing_mode in ("season_packs", "shows"):
+            if (
+                app_type == "sonarr"
+                and missing_items
+                and missing_cap > 0
+                and sonarr_missing_mode in ("season_packs", "shows")
+            ):
                 if sonarr_missing_mode == "season_packs":
                     # Group by series + season and trigger SeasonSearch. This matches Huntarr's efficient default.
                     groups: dict[tuple[int, int], list[Any]] = {}
@@ -514,10 +524,13 @@ class Engine:
                         oldest_tail = rest_g[:tail_n]
                         middle = rest_g[tail_n:]
                         random.shuffle(middle)
-                        grouped = [g for _, g in recent_g] + [g for _, g in middle] + [g for _, g in oldest_tail] + unknown_g
+                        grouped = (
+                            [g for _, g in recent_g] + [g for _, g in middle] + [g for _, g in oldest_tail] + unknown_g
+                        )
                     elif search_order == "random":
                         random.shuffle(grouped)
                     else:
+
                         def _group_sort_key(item: tuple[tuple[int, int], list[Any]]) -> tuple[int, float, int]:
                             _, eps = item
                             best = None
@@ -593,10 +606,13 @@ class Engine:
                         oldest_tail = rest_g[:tail_n]
                         middle = rest_g[tail_n:]
                         random.shuffle(middle)
-                        grouped = [g for _, g in recent_g] + [g for _, g in middle] + [g for _, g in oldest_tail] + unknown_g
+                        grouped = (
+                            [g for _, g in recent_g] + [g for _, g in middle] + [g for _, g in oldest_tail] + unknown_g
+                        )
                     elif search_order == "random":
                         random.shuffle(grouped)
                     else:
+
                         def _show_sort_key(item: tuple[int, list[Any]]) -> tuple[int, float, int]:
                             _, eps = item
                             best = None
@@ -627,7 +643,11 @@ class Engine:
                             pace_seconds=effective_between_actions,
                             series_id=sid,
                             series_title=str(getattr(eps[0], "series_title", "") or ""),
-                            episode_ids=[int(getattr(e, "episode_id", 0) or 0) for e in eps if int(getattr(e, "episode_id", 0) or 0) > 0],
+                            episode_ids=[
+                                int(getattr(e, "episode_id", 0) or 0)
+                                for e in eps
+                                if int(getattr(e, "episode_id", 0) or 0) > 0
+                            ],
                             episode_air_dates_utc=[getattr(e, "air_date_utc", None) for e in eps],
                             client=client,
                             triggered_items=triggered_items,
@@ -642,7 +662,7 @@ class Engine:
             _process(cutoff_items, cutoff_cap, "cutoff")
 
             self._update_sync_status(app_type, instance, interval)
-        except Exception as exc:
+        except Exception:
             status = "error"
             raise
         finally:
@@ -828,7 +848,7 @@ class Engine:
             eligible = False
             newest_dt: datetime | None = None
             newest_eligible_dt: datetime | None = None
-            for iso in (season_air_dates_utc or []):
+            for iso in season_air_dates_utc or []:
                 dt = _parse_arr_datetime_utc(iso)
                 if not dt:
                     # Unknown dates: don't block to avoid starving older series.
@@ -958,7 +978,7 @@ class Engine:
             eligible = False
             newest_dt: datetime | None = None
             newest_eligible_dt: datetime | None = None
-            for iso in (episode_air_dates_utc or []):
+            for iso in episode_air_dates_utc or []:
                 dt = _parse_arr_datetime_utc(iso)
                 if not dt:
                     eligible = True

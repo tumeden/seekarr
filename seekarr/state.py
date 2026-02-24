@@ -203,7 +203,14 @@ class StateStore:
                 INSERT INTO search_action(hunt_type, instance_id, instance_name, item_key, title, occurred_at)
                 VALUES(?, ?, ?, ?, ?, ?)
                 """,
-                (str(hunt_type), int(instance_id), str(instance_name or ""), str(item_key or ""), str(title or ""), _utc_now()),
+                (
+                    str(hunt_type),
+                    int(instance_id),
+                    str(instance_name or ""),
+                    str(item_key or ""),
+                    str(title or ""),
+                    _utc_now(),
+                ),
             )
 
     def get_recent_search_actions(self, hunt_type: str, instance_id: int, limit: int = 50) -> list[dict[str, Any]]:
@@ -258,9 +265,7 @@ class StateStore:
 
     def get_scheduler_heartbeat(self) -> str | None:
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT updated_at FROM scheduler_heartbeat WHERE id = 1"
-            ).fetchone()
+            row = conn.execute("SELECT updated_at FROM scheduler_heartbeat WHERE id = 1").fetchone()
         if not row:
             return None
         updated_at = row["updated_at"]

@@ -8,7 +8,6 @@ import requests
 
 from .config import IndexerConfig
 
-
 NEWZNAB_NS = "http://www.newznab.com/DTD/2010/feeds/attributes/"
 
 
@@ -64,11 +63,11 @@ def _parse_xml(xml_text: str, indexer: IndexerConfig) -> list[Release]:
     items = root.findall(".//item")
     out: list[Release] = []
     for item in items:
-        title = ((item.findtext("title") or "").strip())
+        title = (item.findtext("title") or "").strip()
         if not title:
             continue
-        guid = ((item.findtext("guid") or "").strip())
-        link = ((item.findtext("link") or "").strip())
+        guid = (item.findtext("guid") or "").strip()
+        link = (item.findtext("link") or "").strip()
         if not guid:
             guid = link or title
 

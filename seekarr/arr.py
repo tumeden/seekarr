@@ -12,6 +12,7 @@ from .config import ArrConfig
 def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", (text or "").lower())).strip()
 
+
 def _as_bool(value: Any) -> bool | None:
     if value is None:
         return None
@@ -245,13 +246,11 @@ class ArrClient:
                     continue
                 monitored = bool(_as_bool(row.get("monitored")) is not False)
                 # Prefer digitalRelease if present, otherwise physicalRelease, otherwise inCinemas.
-                release_utc = (
-                    row.get("digitalRelease")
-                    or row.get("physicalRelease")
-                    or row.get("inCinemas")
-                    or None
-                )
-                lookup[movie_id] = {"monitored": monitored, "release_date_utc": str(release_utc) if release_utc else None}
+                release_utc = row.get("digitalRelease") or row.get("physicalRelease") or row.get("inCinemas") or None
+                lookup[movie_id] = {
+                    "monitored": monitored,
+                    "release_date_utc": str(release_utc) if release_utc else None,
+                }
         except (ArrRequestError, requests.RequestException):
             return lookup
         return lookup
@@ -305,7 +304,9 @@ class ArrClient:
                 out[movie_id] = item
         return list(out.values())
 
-    def fetch_wanted_episodes(self, search_missing: bool = True, search_cutoff_unmet: bool = True) -> list[WantedEpisode]:
+    def fetch_wanted_episodes(
+        self, search_missing: bool = True, search_cutoff_unmet: bool = True
+    ) -> list[WantedEpisode]:
         if not self.config.enabled:
             return []
         missing_rows = self._fetch_paged_records("/api/v3/wanted/missing") if search_missing else []

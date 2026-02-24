@@ -62,6 +62,14 @@ SONARR_API_KEY_1=your-sonarr-key
 python -m pip install -r requirements.txt
 ```
 
+Optional (developer): lint/test tools:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m ruff check .
+python -m pytest -q
+```
+
 5. Run it (pick one):
 
 Console (worker):

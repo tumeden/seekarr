@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -60,6 +61,56 @@ def main() -> int:
     # Independent per-instance scheduling: each instance sleeps until its next_sync_time.
     stop_event = threading.Event()
     run_lock = threading.Lock()  # prevent overlapping Arr calls across instances
+    status_interval = 0
+    try:
+        status_interval = int(os.getenv("SEEKARR_CONSOLE_STATUS_SECONDS", "30"))
+    except (TypeError, ValueError):
+        status_interval = 30
+
+    def _fmt_countdown(next_iso: str | None) -> str:
+        if not next_iso:
+            return "no schedule"
+        try:
+            dt = datetime.fromisoformat(str(next_iso))
+        except ValueError:
+            return "no schedule"
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        seconds = int((dt.astimezone(timezone.utc) - now).total_seconds())
+        if seconds <= 0:
+            return "due"
+        mm, ss = divmod(seconds, 60)
+        hh, mm = divmod(mm, 60)
+        if hh > 0:
+            return f"in {hh}h{mm:02d}m"
+        if mm > 0:
+            return f"in {mm}m{ss:02d}s"
+        return f"in {ss}s"
+
+    def _status_loop() -> None:
+        if status_interval <= 0:
+            return
+        while not stop_event.is_set():
+            try:
+                statuses = store.get_sync_statuses()
+                status_map: dict[tuple[str, int], dict[str, str | None]] = {}
+                for row in statuses:
+                    status_map[(str(row.get("app_type") or ""), int(row.get("instance_id") or 0))] = row
+
+                parts: list[str] = []
+                for inst in config.radarr_instances:
+                    row = status_map.get(("radarr", int(inst.instance_id))) or {}
+                    parts.append(f"radarr:{int(inst.instance_id)} {_fmt_countdown(row.get('next_sync_time'))}")
+                for inst in config.sonarr_instances:
+                    row = status_map.get(("sonarr", int(inst.instance_id))) or {}
+                    parts.append(f"sonarr:{int(inst.instance_id)} {_fmt_countdown(row.get('next_sync_time'))}")
+
+                state = "RUNNING" if run_lock.locked() else "IDLE"
+                logger.info("Status (%s): %s", state, " | ".join(parts))
+            except Exception as exc:
+                logger.debug("Status loop error: %s", exc)
+            stop_event.wait(timeout=max(5, status_interval))
 
     def _sleep_until(iso: str | None) -> None:
         if not iso:
@@ -123,6 +174,8 @@ def main() -> int:
         )
         threads.append(t)
         t.start()
+
+    threading.Thread(target=_status_loop, name="seekarr-status", daemon=True).start()
 
     # Optional: run once immediately regardless of due time, then continue sleeping until due.
     if args.force:

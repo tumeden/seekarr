@@ -1,6 +1,21 @@
 # Seekarr
 
-Seekarr automatically triggers Radarr/Sonarr searches for items you already have in your library list.
+Seekarr automatically triggers Radarr/Sonarr searches for items already in your library (missing and/or cutoff-unmet), on a schedule, with cooldown + rate limits to avoid API spam.
+
+This project exists as a minimal replacement for Huntarr’s auto-search behavior after the original repository was removed.
+
+Scope:
+- Focused strictly on automatic searching via Sonarr/Radarr.
+- No unrelated “arr suite” features (download cleanup, etc).
+
+Transparency:
+- Built with significant AI assistance. Review and use at your own discretion.
+
+<!-- screenshots -->
+<img width="1474" height="529" alt="Seekarr dashboard" src="https://github.com/user-attachments/assets/85993bc0-6466-4349-9a82-df99ef89a818" />
+<img width="1416" height="689" alt="Seekarr settings" src="https://github.com/user-attachments/assets/7f9a56f9-62b5-4c3d-ab2e-16931f9a9069" />
+
+
 
 ## What It Does
 
@@ -10,7 +25,7 @@ Seekarr automatically triggers Radarr/Sonarr searches for items you already have
 - Rate-limits and paces search requests so large libraries do not cause bursts.
 - Skips unreleased content (default: wait 8 hours after air/release).
 - Can pause searching during quiet hours (default: 23:00 to 06:00 local time).
-
+ 
 ## How It Works (In Plain English)
 
 Each configured instance (one Radarr, one Sonarr, or many of each) runs on its own interval:

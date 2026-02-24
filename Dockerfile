@@ -11,7 +11,10 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY . /app
 
 # Non-root runtime user
-RUN useradd -u 10001 -m appuser && chown -R appuser:appuser /app
+RUN useradd -u 10001 -m appuser && \
+    mkdir -p /data && \
+    chown -R appuser:appuser /app /data && \
+    chmod 775 /data
 USER appuser
 
 # Default: run the Web UI (includes auto-run logic). Mount /data for persistence:

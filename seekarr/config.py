@@ -129,7 +129,14 @@ def _is_docker_data_path(config_path: Path) -> bool:
 def _ensure_config_exists(config_path: Path) -> None:
     if config_path.exists():
         return
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+    except PermissionError as exc:
+        raise PermissionError(
+            f"Cannot create config directory {str(config_path.parent)!r}. "
+            "If you're running in Docker, ensure your /data (or /config) volume is writable by the container user "
+            "(UID 10001 by default), or run the container as root."
+        ) from exc
 
     # Prefer the repo's config.example.yaml when available (Docker image includes it).
     template_path = Path(__file__).resolve().parents[1] / "config.example.yaml"
@@ -203,7 +210,14 @@ def _ensure_config_exists(config_path: Path) -> None:
             },
         }
 
-    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    try:
+        config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    except PermissionError as exc:
+        raise PermissionError(
+            f"Cannot write config file {str(config_path)!r}. "
+            "If you're running in Docker, ensure your /data (or /config) volume is writable by the container user "
+            "(UID 10001 by default), or run the container as root."
+        ) from exc
 
 
 def load_config(path: str) -> RuntimeConfig:

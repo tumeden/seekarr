@@ -13,7 +13,8 @@ Transparency:
 
 <!-- screenshots -->
 <img width="1474" height="529" alt="Seekarr dashboard" src="https://github.com/user-attachments/assets/85993bc0-6466-4349-9a82-df99ef89a818" />
-<img width="1416" height="689" alt="Seekarr settings" src="https://github.com/user-attachments/assets/7f9a56f9-62b5-4c3d-ab2e-16931f9a9069" />
+<img width="1400" height="774" alt="image" src="https://github.com/user-attachments/assets/8da3fdd8-b83b-4bb2-9400-a58499e127bf" />
+
 
 
 

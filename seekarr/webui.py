@@ -106,6 +106,7 @@ def _verify_password(password: str, password_hash: str) -> bool:
     except Exception:
         return False
 
+
 def create_app(config_path: str) -> Flask:
     config_path = str(Path(config_path).resolve())
     config = load_config(config_path)

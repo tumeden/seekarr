@@ -9,7 +9,7 @@ from typing import Any, Callable
 from .arr import (
     ArrClient,
 )
-from .config import ArrSyncInstanceConfig, RuntimeConfig
+from .config import ArrConfig, ArrSyncInstanceConfig, RuntimeConfig
 from .state import StateStore
 
 
@@ -290,9 +290,11 @@ class Engine:
         retry_hours = int(instance.item_retry_hours or self.config.app.item_retry_hours)
         rate_window_minutes = int(instance.rate_window_minutes or self.config.app.rate_window_minutes)
         rate_cap = int(instance.rate_cap or self.config.app.rate_cap_per_instance)
+        api_key = self.store.get_arr_api_key(app_type, instance.instance_id) or instance.arr.api_key
+        arr_cfg = ArrConfig(enabled=instance.arr.enabled, url=instance.arr.url, api_key=api_key)
         client = ArrClient(
             name=app_type,
-            config=instance.arr,
+            config=arr_cfg,
             timeout_seconds=self.config.app.request_timeout_seconds,
             verify_ssl=self.config.app.verify_ssl,
             logger=self.logger,

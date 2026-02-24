@@ -1,4 +1,5 @@
 import argparse
+import getpass
 import logging
 import os
 import threading
@@ -19,6 +20,12 @@ def parse_args() -> argparse.Namespace:
         "--config",
         required=True,
         help="Path to YAML config file.",
+    )
+    parser.add_argument(
+        "--set-api-key",
+        nargs=2,
+        metavar=("APP", "INSTANCE_ID"),
+        help="Prompt for and save an Arr API key (encrypted) into the SQLite DB.",
     )
     parser.add_argument(
         "--once",
@@ -50,6 +57,24 @@ def main() -> int:
     setup_logging(config.app.log_level)
     logger = logging.getLogger("seekarr")
     store = StateStore(config.app.db_path)
+
+    if args.set_api_key:
+        app = str(args.set_api_key[0] or "").strip().lower()
+        try:
+            instance_id = int(args.set_api_key[1])
+        except (TypeError, ValueError):
+            logger.error("Invalid INSTANCE_ID for --set-api-key.")
+            return 2
+        if app not in ("radarr", "sonarr") or instance_id <= 0:
+            logger.error("Usage: --set-api-key <radarr|sonarr> <instance_id>")
+            return 2
+        api_key = getpass.getpass(f"Enter {app.upper()} API key for instance {instance_id}: ").strip()
+        if not api_key:
+            logger.error("No API key entered.")
+            return 2
+        store.set_arr_api_key(app, instance_id, api_key)
+        logger.info("%s API key saved for instance %d (encrypted).", app.upper(), instance_id)
+        return 0
 
     if not config.radarr_instances and not config.sonarr_instances:
         logger.error("No instances configured. Add radarr.instances and/or sonarr.instances.")

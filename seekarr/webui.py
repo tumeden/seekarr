@@ -1,6 +1,10 @@
 import argparse
+import base64
+import hashlib
+import hmac
 import logging
 import os
+import secrets
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -27,7 +31,7 @@ class _QuietAccessFilter(logging.Filter):
         return not any(path in msg for path in noisy_paths)
 
 
-def _config_view(config: RuntimeConfig) -> dict[str, Any]:
+def _config_view(config: RuntimeConfig, store: StateStore) -> dict[str, Any]:
     def _instance_row(app: str, inst) -> dict[str, Any]:
         return {
             "app": app,
@@ -66,6 +70,7 @@ def _config_view(config: RuntimeConfig) -> dict[str, Any]:
             "rate_cap": inst.rate_cap or config.app.rate_cap_per_instance,
             "arr_enabled": bool(inst.enabled),
             "arr_url": inst.arr.url,
+            "api_key_set": bool(store.has_arr_api_key(app, inst.instance_id) or getattr(inst.arr, "api_key", "")),
         }
 
     rows = []
@@ -75,6 +80,31 @@ def _config_view(config: RuntimeConfig) -> dict[str, Any]:
         rows.append(_instance_row("sonarr", inst))
     return {"instances": rows}
 
+
+def _hash_password(password: str) -> str:
+    pw = str(password or "").encode("utf-8")
+    salt = secrets.token_bytes(16)
+    iterations = 200_000
+    dk = hashlib.pbkdf2_hmac("sha256", pw, salt, iterations, dklen=32)
+    return "pbkdf2_sha256$%d$%s$%s" % (
+        iterations,
+        base64.urlsafe_b64encode(salt).decode("ascii").rstrip("="),
+        base64.urlsafe_b64encode(dk).decode("ascii").rstrip("="),
+    )
+
+
+def _verify_password(password: str, password_hash: str) -> bool:
+    try:
+        algo, it_s, salt_s, dk_s = str(password_hash).split("$", 3)
+        if algo != "pbkdf2_sha256":
+            return False
+        iterations = int(it_s)
+        salt = base64.urlsafe_b64decode(salt_s + "=" * (-len(salt_s) % 4))
+        expected = base64.urlsafe_b64decode(dk_s + "=" * (-len(dk_s) % 4))
+        got = hashlib.pbkdf2_hmac("sha256", str(password or "").encode("utf-8"), salt, iterations, dklen=len(expected))
+        return hmac.compare_digest(got, expected)
+    except Exception:
+        return False
 
 def create_app(config_path: str) -> Flask:
     config_path = str(Path(config_path).resolve())
@@ -108,6 +138,69 @@ def create_app(config_path: str) -> Flask:
     }
 
     app = Flask(__name__)
+
+    password_hash = store.get_webui_password_hash()
+    env_pw = str(os.getenv("SEEKARR_WEBUI_PASSWORD", "") or "").strip()
+    if not password_hash and env_pw:
+        password_hash = _hash_password(env_pw)
+        store.set_webui_password_hash(password_hash)
+
+    def _json_unauthorized(msg: str = "Unauthorized") -> Any:
+        return jsonify({"error": msg}), 401
+
+    @app.before_request
+    def _auth() -> Any:
+        nonlocal password_hash
+        if not request.path.startswith("/api/"):
+            return None
+        if request.path in ("/api/auth/status", "/api/auth/bootstrap"):
+            return None
+        if not password_hash:
+            return _json_unauthorized("Web UI password not set")
+
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(auth.split(" ", 1)[1]).decode("utf-8", "ignore")
+                pw = decoded.split(":", 1)[1] if ":" in decoded else ""
+            except Exception:
+                pw = ""
+        else:
+            pw = str(request.headers.get("X-Seekarr-Password", "") or "")
+
+        if not _verify_password(pw, password_hash):
+            return _json_unauthorized()
+        return None
+
+    @app.get("/api/auth/status")
+    def auth_status() -> Any:
+        return jsonify({"password_set": bool(password_hash)})
+
+    @app.post("/api/auth/bootstrap")
+    def auth_bootstrap() -> Any:
+        nonlocal password_hash
+        if password_hash:
+            return jsonify({"error": "Password already set"}), 409
+        payload = request.get_json(silent=True) or {}
+        pw = str(payload.get("password") or "").strip()
+        if len(pw) < 8:
+            return jsonify({"error": "Password must be at least 8 characters"}), 400
+        password_hash = _hash_password(pw)
+        store.set_webui_password_hash(password_hash)
+        return jsonify({"ok": True})
+
+    @app.post("/api/credentials/clear")
+    def clear_credentials() -> Any:
+        payload = request.get_json(silent=True) or {}
+        app_type = str(payload.get("app") or "").strip().lower()
+        try:
+            instance_id = int(payload.get("instance_id") or 0)
+        except (TypeError, ValueError):
+            instance_id = 0
+        if app_type not in ("radarr", "sonarr") or instance_id <= 0:
+            return jsonify({"error": "Invalid instance"}), 400
+        store.clear_arr_api_key(app_type, instance_id)
+        return jsonify({"ok": True})
 
     def _get_config() -> RuntimeConfig:
         with config_lock:
@@ -616,6 +709,34 @@ def create_app(config_path: str) -> Flask:
       border-color: rgba(249, 115, 22, 0.45);
       box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.16);
     }
+    .inline-input {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .inline-input > input.cfg { flex: 1; }
+    .icon-btn {
+      width: 38px;
+      height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      background: rgba(15, 23, 42, 0.55);
+      color: rgba(226, 232, 240, 0.95);
+      padding: 0;
+      cursor: pointer;
+    }
+    .icon-btn:hover { border-color: rgba(249, 115, 22, 0.35); }
+    .icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .icon-btn.danger {
+      border-color: rgba(239, 68, 68, 0.30);
+      background: rgba(239, 68, 68, 0.12);
+      color: rgba(254, 202, 202, 0.98);
+    }
+    .icon-btn.danger:hover { border-color: rgba(239, 68, 68, 0.55); background: rgba(239, 68, 68, 0.18); }
+    .icon-btn svg { width: 16px; height: 16px; }
     .tog {
       display: inline-flex;
       gap: 8px;
@@ -638,9 +759,65 @@ def create_app(config_path: str) -> Flask:
       .settings-grid { grid-template-columns: 1fr; }
       .two-col { grid-template-columns: 1fr; }
     }
+
+    .modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,.55);
+      z-index: 1000;
+      padding: 18px;
+    }
+    .modal.show { display: flex; }
+    .modal-card {
+      width: min(520px, 100%);
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 14px;
+      box-shadow: 0 18px 60px rgba(0,0,0,.55);
+      padding: 14px;
+    }
+    .modal-row { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .modal-title { font-weight: 800; letter-spacing:.06em; text-transform: uppercase; color: var(--text-secondary); font-size: 13px; }
+    .modal-body { margin-top: 12px; }
+    .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top: 12px; }
+    .btn-primary {
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      background: linear-gradient(180deg, rgba(249, 115, 22, 0.95), rgba(234, 88, 12, 0.88));
+      color: #0b0d12;
+      padding: 9px 12px;
+      border-radius: 10px;
+      font-weight: 900;
+      letter-spacing: .06em;
+      cursor: pointer;
+    }
+    .btn-primary:disabled { opacity:.55; cursor:not-allowed; }
   </style>
 </head>
 <body>
+  <div class="modal" id="auth-modal">
+    <div class="modal-card">
+      <div class="modal-row">
+        <div class="modal-title" id="auth-title">Authentication</div>
+      </div>
+      <div class="modal-body">
+        <div class="subline" id="auth-sub" style="margin-bottom:10px;">Enter your Web UI password.</div>
+        <div class="field">
+          <div class="label" id="auth-label">Password</div>
+          <input class="cfg mono" id="auth-password" name="seekarr_webui_password" type="password" value=""
+                 autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
+          <div class="subline" id="auth-hint" style="margin-top:6px;"></div>
+        </div>
+        <div class="subline" id="auth-error" style="margin-top:10px; color: rgba(254, 202, 202, 0.98);"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-primary" id="auth-submit">CONTINUE</button>
+      </div>
+    </div>
+  </div>
+
   <div class="app">
     <aside class="sidebar">
       <div class="brand">Seekarr</div>
@@ -690,7 +867,7 @@ def create_app(config_path: str) -> Flask:
       <section class="content-section" id="section-settings">
         <div class="card" style="margin-top:12px;">
           <h3>Instances</h3>
-          <div class="subline">API keys are not editable here.</div>
+          <div class="subline">API keys are stored encrypted in the SQLite DB (not shown in UI).</div>
           <div style="height:10px;"></div>
           <div class="cards-grid" id="settings-instance-cards"></div>
         </div>
@@ -703,6 +880,115 @@ def create_app(config_path: str) -> Flask:
     </main>
   </div>
   <script>
+    let authHeader = '';
+    let passwordIsSet = false;
+    let authInFlight = false;
+    let authMode = '';
+    let timersStarted = false;
+    let refreshTimer = null;
+    let countdownTimer = null;
+
+    function apiFetch(url, opts) {
+      const o = opts ? Object.assign({}, opts) : {};
+      o.headers = o.headers ? Object.assign({}, o.headers) : {};
+      if (authHeader) o.headers['Authorization'] = authHeader;
+      if (!('cache' in o)) o.cache = 'no-store';
+      return fetch(url, o);
+    }
+
+    function showAuthModal(mode) {
+      const modal = document.getElementById('auth-modal');
+      const title = document.getElementById('auth-title');
+      const sub = document.getElementById('auth-sub');
+      const label = document.getElementById('auth-label');
+      const hint = document.getElementById('auth-hint');
+      const err = document.getElementById('auth-error');
+      const pw = document.getElementById('auth-password');
+      const btn = document.getElementById('auth-submit');
+
+      err.textContent = '';
+      btn.disabled = false;
+
+      const isShown = modal.classList.contains('show');
+      const modeChanged = (authMode !== mode);
+      authMode = mode;
+      if (!isShown || modeChanged) {
+        pw.value = '';
+      }
+
+      if (mode === 'set') {
+        title.textContent = 'Set Web UI Password';
+        sub.textContent = 'First run: set a password to protect Seekarr.';
+        label.textContent = 'New Password';
+        pw.setAttribute('autocomplete', 'new-password');
+        hint.textContent = 'Minimum 8 characters. Saved as a salted hash in the SQLite DB.';
+      } else {
+        title.textContent = 'Unlock Seekarr';
+        sub.textContent = 'Enter your Web UI password to continue.';
+        label.textContent = 'Password';
+        pw.setAttribute('autocomplete', 'new-password');
+        hint.textContent = '';
+      }
+
+      modal.classList.add('show');
+      setTimeout(() => pw.focus(), 50);
+    }
+
+    function hideAuthModal() {
+      document.getElementById('auth-modal').classList.remove('show');
+    }
+
+    async function ensureAuth() {
+      const modal = document.getElementById('auth-modal');
+      if (modal.classList.contains('show')) return;
+      if (authInFlight) return;
+      authInFlight = true;
+      const st = await fetch('/api/auth/status', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}));
+      passwordIsSet = !!st.password_set;
+      showAuthModal(passwordIsSet ? 'login' : 'set');
+      authInFlight = false;
+    }
+
+    async function authSubmit() {
+      const btn = document.getElementById('auth-submit');
+      const err = document.getElementById('auth-error');
+      const pw = String(document.getElementById('auth-password').value || '');
+      err.textContent = '';
+      btn.disabled = true;
+
+      if (!passwordIsSet) {
+        const r = await fetch('/api/auth/bootstrap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pw }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          err.textContent = data.error || 'Failed to set password';
+          btn.disabled = false;
+          return;
+        }
+        passwordIsSet = true;
+      }
+
+      authHeader = 'Basic ' + btoa('seekarr:' + pw);
+      const testOk = await apiFetch('/api/status').then(r => r.ok).catch(() => false);
+      if (!testOk) {
+        err.textContent = 'Invalid password';
+        authHeader = '';
+        btn.disabled = false;
+        return;
+      }
+
+      hideAuthModal();
+      await refresh();
+      if (!timersStarted) {
+        timersStarted = true;
+        refreshTimer = setInterval(refresh, 5000);
+        countdownTimer = setInterval(tickCountdowns, 1000);
+      }
+    }
+
     function asBadge(ok) {
       return ok ? '<span class="badge ok">ON</span>' : '<span class="badge off">OFF</span>';
     }
@@ -758,7 +1044,7 @@ def create_app(config_path: str) -> Flask:
 
     async function setAutorun(enabled) {
       try {
-        await fetch('/api/autorun', {
+        await apiFetch('/api/autorun', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ enabled }),
@@ -769,7 +1055,7 @@ def create_app(config_path: str) -> Flask:
     async function forceRunInstance(app, instanceId) {
       const msg = document.getElementById('msg');
       msg.textContent = `Force run started for ${app}:${instanceId}...`;
-      const r = await fetch('/api/run_instance', {
+      const r = await apiFetch('/api/run_instance', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ app, instance_id: instanceId, force: true })
@@ -789,7 +1075,7 @@ def create_app(config_path: str) -> Flask:
         await new Promise(res => setTimeout(res, 500));
         let st;
         try {
-          st = await (await fetch('/api/status', { cache:'no-store' })).json();
+          st = await (await apiFetch('/api/status', { cache:'no-store' })).json();
         } catch (e) {
           continue;
         }
@@ -817,7 +1103,11 @@ def create_app(config_path: str) -> Flask:
     }
 
     async function refresh() {
-      const r = await fetch('/api/status');
+      const r = await apiFetch('/api/status');
+      if (r.status === 401) {
+        await ensureAuth();
+        return;
+      }
       const data = await r.json();
       
       const rs = data.run_state || {};
@@ -996,13 +1286,37 @@ def create_app(config_path: str) -> Flask:
       forceRunInstance(app, id);
     });
     document.getElementById('autorun-toggle').addEventListener('change', (e) => setAutorun(!!e.target.checked));
+    document.getElementById('auth-submit').addEventListener('click', authSubmit);
+    document.getElementById('auth-password').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') authSubmit();
+    });
+    document.getElementById('settings-instance-cards').addEventListener('click', async (e) => {
+      const btn = e.target && e.target.closest ? e.target.closest('button[data-clear-key]') : null;
+      if (!btn) return;
+      if (btn.disabled) return;
+      const app = String(btn.getAttribute('data-app') || '').trim();
+      const instanceId = Number(btn.getAttribute('data-id') || 0);
+      if (!app || !instanceId) return;
+      if (!confirm(`Delete the stored ${app.toUpperCase()} API key for instance #${instanceId}?`)) return;
+      const r = await apiFetch('/api/credentials/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ app, instance_id: instanceId }),
+      });
+      const data = await r.json().catch(() => ({}));
+      const msg = document.getElementById('settings-msg');
+      if (!r.ok) {
+        msg.textContent = data.error || 'Delete failed';
+        return;
+      }
+      msg.textContent = 'API key deleted';
+      await loadSettings();
+    });
     setSection('dashboard');
-    refresh();
-    setInterval(refresh, 5000);
-    setInterval(tickCountdowns, 1000);
+    ensureAuth();
 
     async function loadSettings() {
-      const r = await fetch('/api/settings', { cache:'no-store' });
+      const r = await apiFetch('/api/settings', { cache:'no-store' });
       const data = await r.json();
 
       const wrap = document.getElementById('settings-instance-cards');
@@ -1108,6 +1422,23 @@ def create_app(config_path: str) -> Flask:
               <div class="label">Arr URL</div>
               <input class="cfg mono si_url" type="text" value="${safe(inst.arr_url)}"/>
             </div>
+            <div class="field" style="margin-top:10px;">
+              <div class="label">API Key</div>
+              <div class="inline-input">
+                <input class="cfg mono si_apikey" type="password" value="" placeholder="${inst.api_key_set ? '********' : '(not set)'}"/>
+                <button class="icon-btn danger" type="button" title="Delete stored API key" aria-label="Delete stored API key"
+                        data-clear-key="1" data-app="${safe(inst.app)}" data-id="${safe(inst.instance_id)}" ${inst.api_key_set ? '' : 'disabled'}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 6h18"></path>
+                    <path d="M8 6V4h8v2"></path>
+                    <path d="M6 6l1 16h10l1-16"></path>
+                    <path d="M10 11v6"></path>
+                    <path d="M14 11v6"></path>
+                  </svg>
+                </button>
+              </div>
+              <div class="subline" style="margin-top:6px;">Leave blank to keep unchanged.</div>
+            </div>
             ${orderUi}
             ${behaviorUi}
             ${modeUi}
@@ -1146,6 +1477,7 @@ def create_app(config_path: str) -> Flask:
           rate_window_minutes: Number(tr.querySelector('.si_rate_window')?.value || 0),
           rate_cap: Number(tr.querySelector('.si_rate_cap')?.value || 0),
           arr_url: String(tr.querySelector('.si_url')?.value || '').trim(),
+          arr_api_key: String(tr.querySelector('.si_apikey')?.value || '').trim(),
         });
       });
 
@@ -1153,7 +1485,7 @@ def create_app(config_path: str) -> Flask:
         instances,
       };
 
-      const r = await fetch('/api/settings', {
+      const r = await apiFetch('/api/settings', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify(payload),
@@ -1217,7 +1549,7 @@ def create_app(config_path: str) -> Flask:
         return jsonify(
             {
                 "server_time_utc": datetime.now(timezone.utc).isoformat(),
-                "config": _config_view(cfg),
+                "config": _config_view(cfg, store),
                 "sync_status": store.get_sync_statuses(),
                 "recent_runs": store.get_recent_runs(20),
                 "rate_status": rate_status,
@@ -1231,7 +1563,7 @@ def create_app(config_path: str) -> Flask:
     @app.get("/api/settings")
     def get_settings() -> Any:
         cfg = _get_config()
-        return jsonify({"instances": _config_view(cfg).get("instances", [])})
+        return jsonify({"instances": _config_view(cfg, store).get("instances", [])})
 
     @app.post("/api/settings")
     def save_settings() -> Any:
@@ -1246,7 +1578,7 @@ def create_app(config_path: str) -> Flask:
             # but we still read them for defaults when persisting per-instance fields.
             raw_app = raw.get("app") if isinstance(raw.get("app"), dict) else {}
 
-            # Instances: update only fields that are safe to edit via UI (no api_key writing).
+            # Instances: update only fields that are safe to edit via UI.
             def _update_instances(section_key: str, arr_key: str, app_name: str) -> None:
                 section = raw.get(section_key) if isinstance(raw.get(section_key), dict) else {}
                 instances = section.get("instances") if isinstance(section.get("instances"), list) else []
@@ -1364,6 +1696,10 @@ def create_app(config_path: str) -> Flask:
                     url = str(ui.get("arr_url") or "").strip()
                     if url:
                         arr_block["url"] = url
+                    api_key = str(ui.get("arr_api_key") or "").strip()
+                    if api_key:
+                        store.set_arr_api_key(app_name, iid, api_key)
+                        arr_block["api_key"] = ""
                     inst[arr_key] = arr_block
 
                 section["instances"] = instances
@@ -1462,6 +1798,21 @@ def main() -> int:
         )
 
     config_path = str(Path(args.config).resolve())
+    try:
+        dotenv_path = Path(config_path).parent / ".env"
+        if dotenv_path.exists():
+            for raw in dotenv_path.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except OSError:
+        pass
+
     app = create_app(config_path)
     # Production default: use waitress (WSGI server). This avoids Flask's dev server warnings
     # and behaves more like a real deployment on Windows/Linux.

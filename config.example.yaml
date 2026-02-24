@@ -30,7 +30,8 @@ radarr:
       rate_cap: 25
       radarr:
         url: http://localhost:7878
-        api_key: "${RADARR_API_KEY_1}"
+        # Provide via Web UI (stored encrypted in SQLite), or set here (supports ${ENV_VAR}).
+        api_key: ""
 
 sonarr:
   instances:
@@ -54,4 +55,4 @@ sonarr:
       rate_cap: 25
       sonarr:
         url: http://localhost:8989
-        api_key: "${SONARR_API_KEY_1}"
+        api_key: ""

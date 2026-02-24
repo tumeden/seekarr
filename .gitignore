@@ -11,6 +11,8 @@ config/
 *.sqlite
 *.sqlite3
 *.log
+seekarr.masterkey
+*.masterkey
 
 # Python caches / builds
 __pycache__/

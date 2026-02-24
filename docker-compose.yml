@@ -9,7 +9,7 @@ services:
     ports:
       - "127.0.0.1:8788:8788"
     volumes:
-      - ./config:/config:ro
+      - ./config:/config
       - ./data:/data
 
   console:
@@ -18,7 +18,7 @@ services:
     command: ["python", "main.py", "--config", "/config/config.yaml"]
     restart: unless-stopped
     volumes:
-      - ./config:/config:ro
+      - ./config:/config
       - ./data:/data
     profiles:
       - console

@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from cryptography.fernet import Fernet, InvalidToken
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -13,6 +15,7 @@ class StateStore:
     def __init__(self, db_path: str) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._fernet: Fernet | None = None
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -90,7 +93,38 @@ class StateStore:
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS arr_credentials (
+                    app_type TEXT NOT NULL,
+                    instance_id INTEGER NOT NULL,
+                    api_key_enc TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (app_type, instance_id)
+                );
+                CREATE TABLE IF NOT EXISTS webui_auth (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    password_hash TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
+            )
+
+    def get_webui_password_hash(self) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT password_hash FROM webui_auth WHERE id = 1").fetchone()
+        if not row:
+            return None
+        value = str(row["password_hash"] or "").strip()
+        return value or None
+
+    def set_webui_password_hash(self, password_hash: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO webui_auth(id, password_hash, updated_at)
+                VALUES(1, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET password_hash=excluded.password_hash, updated_at=excluded.updated_at
+                """,
+                (str(password_hash), _utc_now()),
             )
 
     def is_guid_processed(self, hunt_type: str, instance_id: int, guid: str) -> bool:
@@ -110,6 +144,68 @@ class StateStore:
                 ON CONFLICT(hunt_type, instance_id, guid) DO UPDATE SET processed_at=excluded.processed_at
                 """,
                 (hunt_type, instance_id, guid, _utc_now()),
+            )
+
+    def _key_path(self) -> Path:
+        return self.db_path.parent / "seekarr.masterkey"
+
+    def _get_fernet(self) -> Fernet:
+        if self._fernet is not None:
+            return self._fernet
+        key_path = self._key_path()
+        if key_path.exists():
+            key = key_path.read_text(encoding="utf-8").strip().encode("ascii", "ignore")
+        else:
+            key = Fernet.generate_key()
+            key_path.write_text(key.decode("ascii"), encoding="utf-8")
+            try:
+                key_path.chmod(0o600)
+            except OSError:
+                pass
+        self._fernet = Fernet(key)
+        return self._fernet
+
+    def has_arr_api_key(self, app_type: str, instance_id: int) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM arr_credentials WHERE app_type = ? AND instance_id = ?",
+                (str(app_type), int(instance_id)),
+            ).fetchone()
+        return row is not None
+
+    def set_arr_api_key(self, app_type: str, instance_id: int, api_key: str) -> None:
+        token = self._get_fernet().encrypt(str(api_key).encode("utf-8")).decode("ascii")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO arr_credentials(app_type, instance_id, api_key_enc, updated_at)
+                VALUES(?, ?, ?, ?)
+                ON CONFLICT(app_type, instance_id) DO UPDATE SET api_key_enc=excluded.api_key_enc, updated_at=excluded.updated_at
+                """,
+                (str(app_type), int(instance_id), token, _utc_now()),
+            )
+
+    def get_arr_api_key(self, app_type: str, instance_id: int) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT api_key_enc FROM arr_credentials WHERE app_type = ? AND instance_id = ?",
+                (str(app_type), int(instance_id)),
+            ).fetchone()
+        if not row:
+            return None
+        token = str(row["api_key_enc"] or "").strip()
+        if not token:
+            return None
+        try:
+            return self._get_fernet().decrypt(token.encode("ascii"), ttl=None).decode("utf-8", "ignore").strip() or None
+        except (InvalidToken, ValueError):
+            return None
+
+    def clear_arr_api_key(self, app_type: str, instance_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM arr_credentials WHERE app_type = ? AND instance_id = ?",
+                (str(app_type), int(instance_id)),
             )
 
     def prune_old_guids(self, ttl_hours: int) -> int:

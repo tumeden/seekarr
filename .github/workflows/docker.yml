@@ -59,6 +59,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=sha
+            type=raw,value=latest,enable={{is_tag}}
 
       - name: Docker metadata (Docker Hub)
         id: meta_dockerhub
@@ -71,6 +72,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=sha
+            type=raw,value=latest,enable={{is_tag}}
 
       - name: Login to GHCR
         if: github.event_name != 'pull_request'

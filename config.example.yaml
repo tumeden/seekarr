@@ -48,8 +48,8 @@ sonarr:
       min_seconds_between_actions: 2
       max_missing_actions_per_instance_per_sync: 5
       max_cutoff_actions_per_instance_per_sync: 1
-      # Sonarr missing modes: season_packs (default), shows, episodes
-      sonarr_missing_mode: season_packs
+      # Sonarr missing modes: smart (default), season_packs, shows, episodes
+      sonarr_missing_mode: smart
       item_retry_hours: 72
       rate_window_minutes: 60
       rate_cap: 25

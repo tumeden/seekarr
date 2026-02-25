@@ -82,3 +82,33 @@ radarr:
 
     cfg = load_config(str(cfg_path))
     assert cfg.radarr_instances[0].arr.api_key == "fromdotenv"
+
+
+def test_sonarr_smart_missing_mode_parsed(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        """
+app:
+  db_path: "./state/seekarr.db"
+  request_timeout_seconds: 30
+  verify_ssl: true
+  log_level: INFO
+
+sonarr:
+  instances:
+    - instance_id: 1
+      instance_name: Sonarr Main
+      enabled: true
+      interval_minutes: 25
+      search_missing: true
+      search_cutoff_unmet: false
+      sonarr_missing_mode: Smart
+      sonarr:
+        url: http://localhost:8989
+        api_key: "abc"
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+    assert cfg.sonarr_instances[0].sonarr_missing_mode == "smart"

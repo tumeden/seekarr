@@ -12,6 +12,9 @@ from .arr import (
 from .config import ArrConfig, ArrSyncInstanceConfig, RuntimeConfig
 from .state import StateStore
 
+RECENT_PRIORITY_WINDOW_DAYS = 2
+RECENT_RETRY_HOURS = 6
+
 
 def _parse_arr_datetime_utc(value: Any) -> datetime | None:
     """Parse Arr date strings into a timezone-aware UTC datetime (best effort)."""
@@ -135,6 +138,15 @@ class Engine:
     def _mark_action(self) -> None:
         with self._pacer_lock:
             self._last_action_at = time.monotonic()
+
+    def _is_recent_release(self, app_type: str, release_iso: Any, now: datetime | None = None) -> bool:
+        if app_type not in ("radarr", "sonarr"):
+            return False
+        dt = _parse_arr_datetime_utc(release_iso)
+        if not dt:
+            return False
+        now_utc = now or datetime.now(timezone.utc)
+        return (now_utc - timedelta(days=RECENT_PRIORITY_WINDOW_DAYS)) <= dt <= now_utc
 
     def _find_instance(self, app_type: str, instance_id: int) -> ArrSyncInstanceConfig | None:
         if app_type == "radarr":
@@ -354,6 +366,62 @@ class Engine:
             if search_order not in ("smart", "newest", "oldest", "random"):
                 search_order = "newest"
 
+            now_utc = datetime.now(timezone.utc)
+            radarr_calendar_movie_ids: set[int] = set()
+            radarr_calendar_boost_ts: dict[int, float] = {}
+            sonarr_calendar_episode_ids: set[int] = set()
+            sonarr_calendar_triples: set[tuple[int, int, int]] = set()
+            sonarr_calendar_boost_ts: dict[tuple[int, int, int], float] = {}
+            if app_type == "radarr" and search_order == "smart":
+                try:
+                    calendar_rows = client.fetch_calendar(
+                        start=(now_utc - timedelta(days=3)).date(),
+                        end=(now_utc + timedelta(days=1)).date(),
+                    )
+                    for row in calendar_rows:
+                        movie_id = int(row.get("id") or row.get("movieId") or 0)
+                        release_iso = (
+                            row.get("digitalRelease")
+                            or row.get("physicalRelease")
+                            or row.get("inCinemas")
+                            or row.get("releaseDate")
+                        )
+                        release_dt = _parse_arr_datetime_utc(release_iso)
+                        # Calendar boost only for already-released content near "now".
+                        if not release_dt or release_dt > now_utc:
+                            continue
+                        if movie_id > 0:
+                            radarr_calendar_movie_ids.add(movie_id)
+                            radarr_calendar_boost_ts[movie_id] = release_dt.timestamp()
+                except Exception:
+                    # Best-effort only: smart order still works without calendar.
+                    pass
+            if app_type == "sonarr" and search_order == "smart":
+                try:
+                    calendar_rows = client.fetch_calendar(
+                        start=(now_utc - timedelta(days=3)).date(),
+                        end=(now_utc + timedelta(days=1)).date(),
+                    )
+                    for row in calendar_rows:
+                        sid = int(row.get("seriesId") or 0)
+                        sn = int(row.get("seasonNumber") or 0)
+                        en = int(row.get("episodeNumber") or 0)
+                        eid = int(row.get("id") or row.get("episodeId") or 0)
+                        air_iso = row.get("airDateUtc") or row.get("airDate")
+                        air_dt = _parse_arr_datetime_utc(air_iso)
+                        # Calendar boost only for already-aired content near "now".
+                        if not air_dt or air_dt > now_utc:
+                            continue
+                        if eid > 0:
+                            sonarr_calendar_episode_ids.add(eid)
+                        if sid > 0 and en > 0:
+                            key = (sid, sn, en)
+                            sonarr_calendar_triples.add(key)
+                            sonarr_calendar_boost_ts[key] = air_dt.timestamp()
+                except Exception:
+                    # Best-effort only: smart order still works without calendar.
+                    pass
+
             def _dt(item) -> datetime | None:
                 # Needed for "smart" ordering.
                 if app_type == "radarr":
@@ -363,18 +431,51 @@ class Engine:
             def _smart_order(items: list[Any]) -> list[Any]:
                 """
                 Smart ordering:
+                - calendar-near already-released items first
                 - recent (today/yesterday): newest-first
                 - then random for the bulk of remaining dated items
                 - then oldest dated items last (oldest-first within the tail)
                 - unknown dates absolute last
                 """
-                now_utc = datetime.now(timezone.utc)
                 recent_cutoff = now_utc - timedelta(days=2)
+                calendar_boosted: list[tuple[float, Any]] = []
+                candidate_items: list[Any] = []
+
+                for it in items:
+                    if app_type == "radarr":
+                        movie_id = int(getattr(it, "movie_id", 0) or 0)
+                        if movie_id in radarr_calendar_movie_ids:
+                            ts = radarr_calendar_boost_ts.get(movie_id)
+                            if ts is None:
+                                dt = _dt(it)
+                                ts = dt.timestamp() if dt else 0.0
+                            calendar_boosted.append((ts, it))
+                        else:
+                            candidate_items.append(it)
+                        continue
+                    if app_type != "sonarr":
+                        candidate_items.append(it)
+                        continue
+                    episode_id = int(getattr(it, "episode_id", 0) or 0)
+                    sid = int(getattr(it, "series_id", 0) or 0)
+                    sn = int(getattr(it, "season_number", 0) or 0)
+                    en = int(getattr(it, "episode_number", 0) or 0)
+                    triple = (sid, sn, en)
+                    if episode_id in sonarr_calendar_episode_ids or triple in sonarr_calendar_triples:
+                        ts = sonarr_calendar_boost_ts.get(triple)
+                        if ts is None:
+                            dt = _dt(it)
+                            ts = dt.timestamp() if dt else 0.0
+                        calendar_boosted.append((ts, it))
+                    else:
+                        candidate_items.append(it)
+
+                calendar_boosted.sort(key=lambda x: x[0], reverse=True)
 
                 recent: list[tuple[datetime, Any]] = []
                 dated_rest: list[tuple[datetime, Any]] = []
                 unknown: list[Any] = []
-                for it in items:
+                for it in candidate_items:
                     dt = _dt(it)
                     if not dt:
                         unknown.append(it)
@@ -394,7 +495,8 @@ class Engine:
                 middle = dated_rest[tail_n:]
                 random.shuffle(middle)
 
-                out: list[Any] = [it for _, it in recent]
+                out: list[Any] = [it for _, it in calendar_boosted]
+                out.extend([it for _, it in recent])
                 out.extend([it for _, it in middle])
                 out.extend([it for _, it in oldest_tail])
                 out.extend(unknown)
@@ -425,6 +527,7 @@ class Engine:
                 if getattr(instance, "min_seconds_between_actions", None) is not None
                 else self.config.app.min_seconds_between_actions
             )
+            recent_retry_hours = min(int(retry_hours), RECENT_RETRY_HOURS)
             missing_cap = int(
                 getattr(instance, "max_missing_actions_per_instance_per_sync", None)
                 if getattr(instance, "max_missing_actions_per_instance_per_sync", None) is not None
@@ -441,10 +544,42 @@ class Engine:
             triggered_cutoff = 0
 
             sonarr_missing_mode = (
-                str(getattr(instance, "sonarr_missing_mode", "season_packs") or "season_packs").strip().lower()
+                str(getattr(instance, "sonarr_missing_mode", "smart") or "smart").strip().lower()
             )
             if sonarr_missing_mode in ("seasons_packs", "seasonpacks", "seasons", "season"):
                 sonarr_missing_mode = "season_packs"
+            if sonarr_missing_mode in ("hybrid", "auto"):
+                sonarr_missing_mode = "smart"
+
+            next_eligible_wakeup_utc: datetime | None = None
+            if app_type == "sonarr" and effective_min_hours_after_release > 0 and missing_items:
+                now_utc = datetime.now(timezone.utc)
+                recent_floor = now_utc - timedelta(days=RECENT_PRIORITY_WINDOW_DAYS)
+                for ep in missing_items:
+                    air_dt = _parse_arr_datetime_utc(getattr(ep, "air_date_utc", None))
+                    if not air_dt:
+                        continue
+                    if air_dt < recent_floor or air_dt > now_utc:
+                        continue
+                    eligible_dt = air_dt + timedelta(hours=effective_min_hours_after_release)
+                    if eligible_dt <= now_utc:
+                        continue
+                    if (next_eligible_wakeup_utc is None) or (eligible_dt < next_eligible_wakeup_utc):
+                        next_eligible_wakeup_utc = eligible_dt
+            if app_type == "radarr" and effective_min_hours_after_release > 0 and missing_items:
+                now_utc = datetime.now(timezone.utc)
+                recent_floor = now_utc - timedelta(days=RECENT_PRIORITY_WINDOW_DAYS)
+                for mv in missing_items:
+                    release_dt = _parse_arr_datetime_utc(getattr(mv, "release_date_utc", None))
+                    if not release_dt:
+                        continue
+                    if release_dt < recent_floor or release_dt > now_utc:
+                        continue
+                    eligible_dt = release_dt + timedelta(hours=effective_min_hours_after_release)
+                    if eligible_dt <= now_utc:
+                        continue
+                    if (next_eligible_wakeup_utc is None) or (eligible_dt < next_eligible_wakeup_utc):
+                        next_eligible_wakeup_utc = eligible_dt
 
             def _process(items: list[Any], cap: int, kind: str) -> None:
                 nonlocal triggered_missing, triggered_cutoff
@@ -461,6 +596,7 @@ class Engine:
                         app_type=app_type,
                         instance=instance,
                         retry_hours=retry_hours,
+                        recent_retry_hours=recent_retry_hours,
                         rate_window_minutes=rate_window_minutes,
                         rate_cap=rate_cap,
                         min_hours_after_release=effective_min_hours_after_release,
@@ -482,9 +618,9 @@ class Engine:
                 app_type == "sonarr"
                 and missing_items
                 and missing_cap > 0
-                and sonarr_missing_mode in ("season_packs", "shows")
+                and sonarr_missing_mode in ("season_packs", "shows", "smart")
             ):
-                if sonarr_missing_mode == "season_packs":
+                if sonarr_missing_mode in ("season_packs", "smart"):
                     # Group by series + season and trigger SeasonSearch. This matches Huntarr's efficient default.
                     groups: dict[tuple[int, int], list[Any]] = {}
                     for ep in missing_items:
@@ -502,13 +638,25 @@ class Engine:
                     grouped = list(groups.items())
                     if search_order == "smart":
                         # Use the newest episode air date in the season to bucket recent/random/oldest.
-                        now_utc = datetime.now(timezone.utc)
                         recent_cutoff = now_utc - timedelta(days=2)
+                        calendar_g: list[tuple[float, Any]] = []
                         recent_g: list[tuple[datetime, Any]] = []
                         rest_g: list[tuple[datetime, Any]] = []
                         unknown_g: list[Any] = []
                         for g in grouped:
                             _, eps = g
+                            cal_ts = None
+                            for e in eps:
+                                sid = int(getattr(e, "series_id", 0) or 0)
+                                sn = int(getattr(e, "season_number", 0) or 0)
+                                en = int(getattr(e, "episode_number", 0) or 0)
+                                triple = (sid, sn, en)
+                                if triple in sonarr_calendar_triples:
+                                    ts = sonarr_calendar_boost_ts.get(triple, 0.0)
+                                    cal_ts = ts if cal_ts is None or ts > cal_ts else cal_ts
+                            if cal_ts is not None:
+                                calendar_g.append((cal_ts, g))
+                                continue
                             newest = None
                             for e in eps:
                                 dt = _parse_arr_datetime_utc(getattr(e, "air_date_utc", None))
@@ -520,6 +668,7 @@ class Engine:
                                 recent_g.append((newest, g))
                             else:
                                 rest_g.append((newest, g))
+                        calendar_g.sort(key=lambda x: x[0], reverse=True)
                         recent_g.sort(key=lambda x: x[0], reverse=True)
                         rest_g.sort(key=lambda x: x[0])  # oldest -> newest
                         tail_n = max(1, int(len(rest_g) * 0.10)) if rest_g else 0
@@ -527,7 +676,11 @@ class Engine:
                         middle = rest_g[tail_n:]
                         random.shuffle(middle)
                         grouped = (
-                            [g for _, g in recent_g] + [g for _, g in middle] + [g for _, g in oldest_tail] + unknown_g
+                            [g for _, g in calendar_g]
+                            + [g for _, g in recent_g]
+                            + [g for _, g in middle]
+                            + [g for _, g in oldest_tail]
+                            + unknown_g
                         )
                     elif search_order == "random":
                         random.shuffle(grouped)
@@ -550,29 +703,108 @@ class Engine:
                             return (1 if best else 0, best.timestamp() if best else 0.0, len(eps))
 
                         grouped.sort(key=_group_sort_key, reverse=(search_order == "newest"))
+
+                    season_inventory_cache: dict[int, dict[int, dict[str, int]]] = {}
+
+                    def _smart_mode_action(series_id: int, season_number: int, eps: list[Any]) -> str:
+                        """
+                        Returns one of: "season_pack", "episodes", "skip"
+                        """
+                        if sonarr_missing_mode != "smart":
+                            return "season_pack"
+                        season_key = f"season:{int(series_id)}:{int(season_number)}"
+                        season_cooldown_hours = int(retry_hours)
+                        if any(
+                            self._is_recent_release("sonarr", getattr(e, "air_date_utc", None))
+                            for e in (eps or [])
+                        ):
+                            season_cooldown_hours = min(season_cooldown_hours, int(recent_retry_hours))
+                        if self.store.item_on_cooldown(
+                            "sonarr",
+                            instance.instance_id,
+                            season_key,
+                            season_cooldown_hours,
+                        ):
+                            # Smart mode should move on to other seasons/shows when a season pack
+                            # was already attempted recently.
+                            return "skip"
+                        inv = season_inventory_cache.get(int(series_id))
+                        if inv is None:
+                            inv = client.fetch_series_season_inventory(int(series_id))
+                            season_inventory_cache[int(series_id)] = inv
+                        season_stats = inv.get(int(season_number)) or {}
+                        aired_total = int(season_stats.get("aired_total") or 0)
+                        aired_downloaded = int(season_stats.get("aired_downloaded") or 0)
+                        # Truly empty season in library: prefer season pack.
+                        if aired_total > 0 and aired_downloaded == 0:
+                            return "season_pack"
+                        episode_numbers = {
+                            int(getattr(e, "episode_number", 0) or 0)
+                            for e in eps
+                            if int(getattr(e, "episode_number", 0) or 0) > 0
+                        }
+                        if not episode_numbers:
+                            return "season_pack" if len(eps) >= 3 else "episodes"
+                        highest_episode = max(episode_numbers)
+                        coverage = float(len(episode_numbers)) / float(highest_episode) if highest_episode > 0 else 0.0
+                        # "Mostly empty season" heuristic:
+                        # - enough missing episodes to justify a pack search
+                        # - the missing episodes cover a large portion of the aired season
+                        if (len(episode_numbers) >= 3 and coverage >= 0.6) or len(episode_numbers) >= 6:
+                            return "season_pack"
+                        return "episodes"
+
                     for (sid, sn), eps in grouped:
                         if triggered_missing >= missing_cap:
                             break
-                        before = stats.actions_triggered
-                        self._handle_sonarr_season_search(
-                            instance=instance,
-                            retry_hours=retry_hours,
-                            rate_window_minutes=rate_window_minutes,
-                            rate_cap=rate_cap,
-                            min_hours_after_release=effective_min_hours_after_release,
-                            pace_seconds=effective_between_actions,
-                            series_id=sid,
-                            series_title=str(getattr(eps[0], "series_title", "") or ""),
-                            season_number=sn,
-                            season_air_dates_utc=[getattr(e, "air_date_utc", None) for e in eps],
-                            client=client,
-                            triggered_items=triggered_items,
-                            stats=stats,
-                            progress_cb=progress_cb,
-                        )
-                        if stats.actions_triggered > before:
-                            triggered_missing += 1
-                            # Pacing is enforced inside the handler so it's shared across instances.
+                        action = _smart_mode_action(sid, sn, eps)
+                        if action == "skip":
+                            continue
+                        if action == "season_pack":
+                            before = stats.actions_triggered
+                            self._handle_sonarr_season_search(
+                                instance=instance,
+                                retry_hours=retry_hours,
+                                recent_retry_hours=recent_retry_hours,
+                                rate_window_minutes=rate_window_minutes,
+                                rate_cap=rate_cap,
+                                min_hours_after_release=effective_min_hours_after_release,
+                                pace_seconds=effective_between_actions,
+                                series_id=sid,
+                                series_title=str(getattr(eps[0], "series_title", "") or ""),
+                                season_number=sn,
+                                season_air_dates_utc=[getattr(e, "air_date_utc", None) for e in eps],
+                                client=client,
+                                triggered_items=triggered_items,
+                                stats=stats,
+                                progress_cb=progress_cb,
+                            )
+                            if stats.actions_triggered > before:
+                                triggered_missing += 1
+                                # Pacing is enforced inside the handler so it's shared across instances.
+                        else:
+                            for ep in eps:
+                                if triggered_missing >= missing_cap:
+                                    break
+                                before = stats.actions_triggered
+                                self._handle_wanted_item(
+                                    app_type="sonarr",
+                                    instance=instance,
+                                    retry_hours=retry_hours,
+                                    recent_retry_hours=recent_retry_hours,
+                                    rate_window_minutes=rate_window_minutes,
+                                    rate_cap=rate_cap,
+                                    min_hours_after_release=effective_min_hours_after_release,
+                                    pace_seconds=effective_between_actions,
+                                    wanted_item=ep,
+                                    client=client,
+                                    triggered_items=triggered_items,
+                                    stats=stats,
+                                    progress_cb=progress_cb,
+                                )
+                                if stats.actions_triggered > before:
+                                    triggered_missing += 1
+                                    # Pacing is enforced inside the handler so it's shared across instances.
                 else:
                     # Group by show and trigger EpisodeSearch for all eligible missing episodes in that show.
                     shows: dict[int, list[Any]] = {}
@@ -584,13 +816,25 @@ class Engine:
 
                     grouped = list(shows.items())
                     if search_order == "smart":
-                        now_utc = datetime.now(timezone.utc)
                         recent_cutoff = now_utc - timedelta(days=2)
+                        calendar_g: list[tuple[float, Any]] = []
                         recent_g: list[tuple[datetime, Any]] = []
                         rest_g: list[tuple[datetime, Any]] = []
                         unknown_g: list[Any] = []
                         for g in grouped:
                             _, eps = g
+                            cal_ts = None
+                            for e in eps:
+                                sid = int(getattr(e, "series_id", 0) or 0)
+                                sn = int(getattr(e, "season_number", 0) or 0)
+                                en = int(getattr(e, "episode_number", 0) or 0)
+                                triple = (sid, sn, en)
+                                if triple in sonarr_calendar_triples:
+                                    ts = sonarr_calendar_boost_ts.get(triple, 0.0)
+                                    cal_ts = ts if cal_ts is None or ts > cal_ts else cal_ts
+                            if cal_ts is not None:
+                                calendar_g.append((cal_ts, g))
+                                continue
                             newest = None
                             for e in eps:
                                 dt = _parse_arr_datetime_utc(getattr(e, "air_date_utc", None))
@@ -602,6 +846,7 @@ class Engine:
                                 recent_g.append((newest, g))
                             else:
                                 rest_g.append((newest, g))
+                        calendar_g.sort(key=lambda x: x[0], reverse=True)
                         recent_g.sort(key=lambda x: x[0], reverse=True)
                         rest_g.sort(key=lambda x: x[0])  # oldest -> newest
                         tail_n = max(1, int(len(rest_g) * 0.10)) if rest_g else 0
@@ -609,7 +854,11 @@ class Engine:
                         middle = rest_g[tail_n:]
                         random.shuffle(middle)
                         grouped = (
-                            [g for _, g in recent_g] + [g for _, g in middle] + [g for _, g in oldest_tail] + unknown_g
+                            [g for _, g in calendar_g]
+                            + [g for _, g in recent_g]
+                            + [g for _, g in middle]
+                            + [g for _, g in oldest_tail]
+                            + unknown_g
                         )
                     elif search_order == "random":
                         random.shuffle(grouped)
@@ -639,6 +888,7 @@ class Engine:
                         self._handle_sonarr_show_search(
                             instance=instance,
                             retry_hours=retry_hours,
+                            recent_retry_hours=recent_retry_hours,
                             rate_window_minutes=rate_window_minutes,
                             rate_cap=rate_cap,
                             min_hours_after_release=effective_min_hours_after_release,
@@ -662,8 +912,15 @@ class Engine:
             else:
                 _process(missing_items, missing_cap, "missing")
             _process(cutoff_items, cutoff_cap, "cutoff")
-
-            self._update_sync_status(app_type, instance, interval)
+            wakeup_iso = None
+            if next_eligible_wakeup_utc:
+                now_utc = datetime.now(timezone.utc)
+                if next_eligible_wakeup_utc > now_utc:
+                    wakeup_dt = max(next_eligible_wakeup_utc, now_utc + timedelta(seconds=30))
+                    scheduled_dt = now_utc + timedelta(minutes=interval)
+                    if wakeup_dt < scheduled_dt:
+                        wakeup_iso = wakeup_dt.isoformat()
+            self._update_sync_status(app_type, instance, interval, next_sync_override_iso=wakeup_iso)
         except Exception:
             status = "error"
             raise
@@ -688,9 +945,15 @@ class Engine:
                 stats=inst_stats,
             )
 
-    def _update_sync_status(self, app_type: str, instance: ArrSyncInstanceConfig, interval_minutes: int) -> None:
+    def _update_sync_status(
+        self,
+        app_type: str,
+        instance: ArrSyncInstanceConfig,
+        interval_minutes: int,
+        next_sync_override_iso: str | None = None,
+    ) -> None:
         now = datetime.now(timezone.utc)
-        next_sync = (now + timedelta(minutes=interval_minutes)).isoformat()
+        next_sync = next_sync_override_iso or (now + timedelta(minutes=interval_minutes)).isoformat()
         self.store.upsert_sync_status(
             hunt_type=app_type,
             instance_id=instance.instance_id,
@@ -703,6 +966,7 @@ class Engine:
         app_type: str,
         instance: ArrSyncInstanceConfig,
         retry_hours: int,
+        recent_retry_hours: int,
         rate_window_minutes: int,
         rate_cap: int,
         min_hours_after_release: int,
@@ -766,7 +1030,14 @@ class Engine:
                 )
             return
 
-        if self.store.item_on_cooldown(app_type, instance.instance_id, item_key, retry_hours):
+        cooldown_hours = int(retry_hours)
+        release_iso = getattr(wanted_item, "release_date_utc", None) if app_type == "radarr" else getattr(
+            wanted_item, "air_date_utc", None
+        )
+        if self._is_recent_release(app_type, release_iso, now=now):
+            cooldown_hours = min(cooldown_hours, int(recent_retry_hours))
+
+        if self.store.item_on_cooldown(app_type, instance.instance_id, item_key, cooldown_hours):
             stats.actions_skipped_cooldown += 1
             if progress_cb:
                 progress_cb(
@@ -826,6 +1097,7 @@ class Engine:
         *,
         instance: ArrSyncInstanceConfig,
         retry_hours: int,
+        recent_retry_hours: int,
         rate_window_minutes: int,
         rate_cap: int,
         min_hours_after_release: int,
@@ -901,7 +1173,11 @@ class Engine:
                 )
             return
 
-        if self.store.item_on_cooldown("sonarr", instance.instance_id, item_key, retry_hours):
+        cooldown_hours = int(retry_hours)
+        if any(self._is_recent_release("sonarr", iso, now=now) for iso in (season_air_dates_utc or [])):
+            cooldown_hours = min(cooldown_hours, int(recent_retry_hours))
+
+        if self.store.item_on_cooldown("sonarr", instance.instance_id, item_key, cooldown_hours):
             stats.actions_skipped_cooldown += 1
             if progress_cb:
                 progress_cb(
@@ -954,6 +1230,7 @@ class Engine:
         *,
         instance: ArrSyncInstanceConfig,
         retry_hours: int,
+        recent_retry_hours: int,
         rate_window_minutes: int,
         rate_cap: int,
         min_hours_after_release: int,
@@ -1029,7 +1306,11 @@ class Engine:
                 )
             return
 
-        if self.store.item_on_cooldown("sonarr", instance.instance_id, item_key, retry_hours):
+        cooldown_hours = int(retry_hours)
+        if any(self._is_recent_release("sonarr", iso, now=now) for iso in (episode_air_dates_utc or [])):
+            cooldown_hours = min(cooldown_hours, int(recent_retry_hours))
+
+        if self.store.item_on_cooldown("sonarr", instance.instance_id, item_key, cooldown_hours):
             stats.actions_skipped_cooldown += 1
             if progress_cb:
                 progress_cb(

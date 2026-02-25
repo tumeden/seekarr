@@ -23,7 +23,14 @@ Transparency:
 - Remembers what it already searched (SQLite cooldown) so it will not retry the same item constantly.
 - Paces requests so large libraries do not cause bursts.
 - Skips unreleased content (default: wait 8 hours after air/release).
+- Uses smart calendar-aware prioritization (already-aired/released near-now items are searched first in `search_order: smart`).
+- For recent releases (past 2 days), retries are more aggressive and cycles can wake early when `air/release + min_hours_after_release` is reached.
 - Can pause searching during quiet hours (default: 23:00 to 06:00 local time).
+
+Sonarr missing mode defaults to `smart`:
+- Empty/mostly-empty seasons prefer season-pack searches.
+- Partial seasons can fall back to episode-level searches.
+- If a season-pack key is on cooldown, Smart skips that season and moves on (instead of episode-searching the same cooled-down season).
 
 ---
 
@@ -91,6 +98,16 @@ Notes:
 SEEKARR_WEBUI_PASSWORD=change-me
 RADARR_API_KEY_1=your-radarr-key
 SONARR_API_KEY_1=your-sonarr-key
+```
+
+Permissions note (Docker/Portainer):
+- Seekarr runs as a non-root user (UID `10001`). Your `/data` volume must be writable by that user.
+- Bind mount example (host path `/opt/seekarr`):
+
+```bash
+sudo mkdir -p /opt/seekarr
+sudo chown -R 10001:10001 /opt/seekarr
+sudo chmod -R u+rwX /opt/seekarr
 ```
 
 ---

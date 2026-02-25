@@ -64,7 +64,7 @@ def _config_view(config: RuntimeConfig, store: StateStore) -> dict[str, Any]:
                 if getattr(inst, "max_cutoff_actions_per_instance_per_sync", None) is not None
                 else getattr(config.app, "max_cutoff_actions_per_instance_per_sync", 0)
             ),
-            "sonarr_missing_mode": str(getattr(inst, "sonarr_missing_mode", "season_packs") or "season_packs"),
+            "sonarr_missing_mode": str(getattr(inst, "sonarr_missing_mode", "smart") or "smart"),
             "item_retry_hours": inst.item_retry_hours or config.app.item_retry_hours,
             "rate_window_minutes": inst.rate_window_minutes or config.app.rate_window_minutes,
             "rate_cap": inst.rate_cap or config.app.rate_cap_per_instance,
@@ -1324,7 +1324,7 @@ def create_app(config_path: str) -> Flask:
       wrap.innerHTML = '';
       for (const inst of (data.instances || [])) {
         const key = `${inst.app}:${inst.instance_id}`;
-        const mode = String(inst.sonarr_missing_mode || 'season_packs').toLowerCase();
+        const mode = String(inst.sonarr_missing_mode || 'smart').toLowerCase();
         const order = String(inst.search_order || 'smart').toLowerCase();
         const orderUi = `
             <div class="field" style="margin-top:10px;">
@@ -1374,7 +1374,8 @@ def create_app(config_path: str) -> Flask:
             <div class="field" style="margin-top:10px;">
               <div class="label">Missing Mode</div>
               <select class="cfg si_missing_mode">
-                <option value="season_packs" ${mode === 'season_packs' ? 'selected' : ''}>Season Packs (Default)</option>
+                <option value="smart" ${mode === 'smart' ? 'selected' : ''}>Smart</option>
+                <option value="season_packs" ${mode === 'season_packs' ? 'selected' : ''}>Season Packs</option>
                 <option value="shows" ${mode === 'shows' ? 'selected' : ''}>Show Batch</option>
                 <option value="episodes" ${mode === 'episodes' ? 'selected' : ''}>Episode</option>
               </select>
@@ -1473,7 +1474,7 @@ def create_app(config_path: str) -> Flask:
           min_seconds_between_actions: Number(tr.querySelector('.si_between')?.value || 0),
           max_missing_actions_per_instance_per_sync: Number(tr.querySelector('.si_missing_per_run')?.value || 0),
           max_cutoff_actions_per_instance_per_sync: Number(tr.querySelector('.si_upgrades_per_run')?.value || 0),
-          sonarr_missing_mode: (app === 'sonarr') ? String(tr.querySelector('.si_missing_mode')?.value || 'season_packs') : undefined,
+          sonarr_missing_mode: (app === 'sonarr') ? String(tr.querySelector('.si_missing_mode')?.value || 'smart') : undefined,
           item_retry_hours: Number(tr.querySelector('.si_retry')?.value || 0),
           rate_window_minutes: Number(tr.querySelector('.si_rate_window')?.value || 0),
           rate_cap: Number(tr.querySelector('.si_rate_cap')?.value || 0),
@@ -1648,7 +1649,7 @@ def create_app(config_path: str) -> Flask:
                     # Sonarr-only, but safe to persist in YAML for other apps (ignored by parser).
                     if ui.get("sonarr_missing_mode") is not None:
                         inst["sonarr_missing_mode"] = (
-                            str(ui.get("sonarr_missing_mode") or inst.get("sonarr_missing_mode") or "season_packs")
+                            str(ui.get("sonarr_missing_mode") or inst.get("sonarr_missing_mode") or "smart")
                             .strip()
                             .lower()
                         )

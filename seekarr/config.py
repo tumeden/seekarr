@@ -54,6 +54,7 @@ class ArrSyncInstanceConfig:
     max_missing_actions_per_instance_per_sync: int | None
     max_cutoff_actions_per_instance_per_sync: int | None
     # Sonarr-only: how missing episode searches are triggered.
+    # - "smart": season packs for mostly-empty seasons, episodes otherwise (default)
     # - "season_packs": SeasonSearch per season (best for torrent season packs)
     # - "shows": EpisodeSearch for all missing episodes in a show (batch)
     # - "episodes": EpisodeSearch per episode (least efficient)
@@ -200,7 +201,7 @@ def _ensure_config_exists(config_path: Path) -> None:
                         "min_seconds_between_actions": 2,
                         "max_missing_actions_per_instance_per_sync": 5,
                         "max_cutoff_actions_per_instance_per_sync": 1,
-                        "sonarr_missing_mode": "season_packs",
+                        "sonarr_missing_mode": "smart",
                         "item_retry_hours": 72,
                         "rate_window_minutes": 60,
                         "rate_cap": 25,
@@ -306,7 +307,7 @@ def load_config(path: str) -> RuntimeConfig:
                         if row.get("max_cutoff_actions_per_instance_per_sync") is not None
                         else None
                     ),
-                    sonarr_missing_mode=_require_str(row, "sonarr_missing_mode", "season_packs").lower(),
+                    sonarr_missing_mode=_require_str(row, "sonarr_missing_mode", "smart").lower(),
                     item_retry_hours=(
                         int(row.get("item_retry_hours"))
                         if row.get("item_retry_hours") is not None
@@ -362,7 +363,7 @@ def load_config(path: str) -> RuntimeConfig:
                     min_seconds_between_actions=None,
                     max_missing_actions_per_instance_per_sync=None,
                     max_cutoff_actions_per_instance_per_sync=None,
-                    sonarr_missing_mode="season_packs",
+                    sonarr_missing_mode="smart",
                     item_retry_hours=None,
                     rate_window_minutes=None,
                     rate_cap=None,
@@ -389,7 +390,7 @@ def load_config(path: str) -> RuntimeConfig:
                     min_seconds_between_actions=None,
                     max_missing_actions_per_instance_per_sync=None,
                     max_cutoff_actions_per_instance_per_sync=None,
-                    sonarr_missing_mode="season_packs",
+                    sonarr_missing_mode="smart",
                     item_retry_hours=None,
                     rate_window_minutes=None,
                     rate_cap=None,

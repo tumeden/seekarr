@@ -1,5 +1,7 @@
 import logging
 import re
+from datetime import date
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -210,6 +212,23 @@ class ArrClient:
             page += 1
         return records
 
+    def fetch_calendar(self, start: date, end: date) -> list[dict[str, Any]]:
+        """
+        Fetch Arr calendar records in a date window.
+        Works for both Sonarr and Radarr.
+        """
+        payload = self._request(
+            "GET",
+            "/api/v3/calendar",
+            params={
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            },
+        )
+        if not isinstance(payload, list):
+            return []
+        return [row for row in payload if isinstance(row, dict)]
+
     def _fetch_series_lookup(self) -> dict[int, tuple[str, int, bool]]:
         """Return {series_id: (title, tvdb_id, monitored)} for Sonarr mapping."""
         lookup: dict[int, tuple[str, int, bool]] = {}
@@ -408,6 +427,55 @@ class ArrClient:
                 exc,
             )
             return False
+
+    def fetch_series_season_inventory(self, series_id: int) -> dict[int, dict[str, int]]:
+        """
+        Sonarr helper for Smart mode.
+        Returns:
+            {
+              season_number: {
+                "aired_total": int,      # aired episodes known to Sonarr
+                "aired_downloaded": int, # aired episodes with hasFile=true
+              }
+            }
+        """
+        out: dict[int, dict[str, int]] = {}
+        try:
+            payload = self._request("GET", "/api/v3/episode", params={"seriesId": int(series_id)})
+        except ArrRequestError:
+            return out
+        if not isinstance(payload, list):
+            return out
+
+        now_utc = datetime.now(timezone.utc)
+
+        for row in payload:
+            if not isinstance(row, dict):
+                continue
+            season_number = int(row.get("seasonNumber") or 0)
+            if season_number <= 0:
+                continue
+            air_iso = row.get("airDateUtc") or row.get("airDate")
+            aired = True
+            if air_iso:
+                s = str(air_iso).strip()
+                if s.endswith("Z"):
+                    s = s[:-1] + "+00:00"
+                try:
+                    dt = datetime.fromisoformat(s)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    aired = dt.astimezone(timezone.utc) <= now_utc
+                except ValueError:
+                    aired = True
+            if not aired:
+                continue
+
+            slot = out.setdefault(season_number, {"aired_total": 0, "aired_downloaded": 0})
+            slot["aired_total"] += 1
+            if bool(row.get("hasFile")):
+                slot["aired_downloaded"] += 1
+        return out
 
 
 def movie_matches_release(movie: WantedMovie, release_title: str, tmdb_id: int, imdb_id: str, year: int) -> bool:

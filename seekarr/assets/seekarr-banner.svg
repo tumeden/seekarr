@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-label="Seekarr banner alternative 6">
+  <defs>
+    <linearGradient id="bg6" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b0f14"/>
+      <stop offset="100%" stop-color="#141b27"/>
+    </linearGradient>
+    <linearGradient id="accent6" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffb56a"/>
+      <stop offset="100%" stop-color="#f97316"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="320" rx="20" fill="url(#bg6)"/>
+  <path d="M0 262 C260 214 540 306 1200 222 L1200 320 L0 320 Z" fill="#0f1724" opacity="0.55"/>
+
+  <g transform="translate(34,34)">
+    <rect x="0" y="0" width="256" height="252" rx="24" fill="#0f1622" stroke="#2f3d52" stroke-width="3"/>
+    <rect x="16" y="18" width="224" height="36" rx="10" fill="#111c2c" stroke="#31445f"/>
+    <circle cx="34" cy="36" r="7" fill="#f97316"/>
+    <rect x="52" y="29" width="136" height="14" rx="7" fill="#5d708e"/>
+    <circle cx="210" cy="36" r="9" fill="#e8eef8"/>
+    <path d="M217 43 L224 50" stroke="#e8eef8" stroke-width="4" stroke-linecap="round"/>
+
+    <rect x="16" y="70" width="224" height="164" rx="12" fill="#0e1624" stroke="#273850"/>
+    <g transform="translate(26,84)">
+      <rect x="0" y="0" width="90" height="60" rx="8" fill="#1a2a40"/>
+      <rect x="102" y="0" width="102" height="12" rx="6" fill="#6b7e9c"/>
+      <rect x="102" y="20" width="82" height="10" rx="5" fill="#51627d"/>
+      <rect x="102" y="36" width="68" height="10" rx="5" fill="#51627d"/>
+      <rect x="102" y="52" width="54" height="8" rx="4" fill="#f97316"/>
+    </g>
+
+    <g transform="translate(26,156)">
+      <rect x="0" y="0" width="90" height="60" rx="8" fill="#1a2a40"/>
+      <rect x="102" y="0" width="110" height="12" rx="6" fill="#6b7e9c"/>
+      <rect x="102" y="20" width="90" height="10" rx="5" fill="#51627d"/>
+      <rect x="102" y="36" width="74" height="10" rx="5" fill="#51627d"/>
+      <rect x="102" y="52" width="58" height="8" rx="4" fill="#f97316"/>
+    </g>
+
+    <!-- focus marker -->
+    <rect x="24" y="154" width="94" height="64" rx="10" fill="none" stroke="url(#accent6)" stroke-width="3"/>
+  </g>
+
+  <g transform="translate(320,0)">
+    <text x="0" y="138" fill="#ffffff" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="96" font-weight="900">Seekarr</text>
+    <text x="2" y="188" fill="#a4b4c8" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="28" font-weight="600" letter-spacing="1.6">MISSING + UPGRADE SEARCH AUTOMATION</text>
+    <rect x="0" y="204" width="760" height="2" fill="#2a3648"/>
+    <text x="2" y="246" fill="#ff9a3d" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="19" font-weight="700" letter-spacing="1">MISSING · CUTOFF · CALENDAR-AWARE · RATE-SAFE</text>
+  </g>
+</svg>

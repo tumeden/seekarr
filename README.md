@@ -1,6 +1,10 @@
 # Seekarr
 
 <p align="center">
+  <img src="./seekarr/assets/seekarr-banner.svg" alt="Seekarr banner" width="100%"/>
+</p>
+
+<p align="center">
   <a href="https://github.com/tumeden/seekarr/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/tumeden/seekarr/ci.yml?branch=main&style=flat&logo=github&label=CI"></a>
   <a href="https://github.com/tumeden/seekarr/releases"><img alt="Latest Release" src="https://img.shields.io/github/v/release/tumeden/seekarr?style=flat&logo=github&logoColor=white&label=Latest%20Release"></a>
   <img alt="Commits Since Release" src="https://img.shields.io/github/commits-since/tumeden/seekarr/latest?style=flat&logo=github&logoColor=white&label=Commits">

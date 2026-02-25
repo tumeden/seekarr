@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 
 from .arr import ArrRequestError
 from .config import RuntimeConfig, load_config
@@ -139,6 +139,15 @@ def create_app(config_path: str) -> Flask:
     }
 
     app = Flask(__name__)
+    assets_dir = Path(__file__).resolve().parent / "assets"
+    repo_assets_dir = Path(__file__).resolve().parent.parent
+
+    def _asset_path(name: str) -> Path:
+        bundled = assets_dir / name
+        if bundled.exists():
+            return bundled
+        fallback = repo_assets_dir / name
+        return fallback
 
     password_hash = store.get_webui_password_hash()
     env_pw = str(os.getenv("SEEKARR_WEBUI_PASSWORD", "") or "").strip()
@@ -424,10 +433,10 @@ def create_app(config_path: str) -> Flask:
       padding: 18px 14px;
     }
     .brand {
-      font-weight: 700;
-      font-size: 15px;
-      letter-spacing: .4px;
-      color: var(--text-secondary);
+      font-weight: 800;
+      font-size: 16px;
+      letter-spacing: .3px;
+      color: #fff;
       margin-bottom: 14px;
     }
     .nav-item {
@@ -446,6 +455,16 @@ def create_app(config_path: str) -> Flask:
       background: rgba(249, 115, 22, 0.18);
     }
     .main { min-width: 0; display: flex; flex-direction: column; }
+    .hero-banner {
+      padding: 10px 16px 0 16px;
+    }
+    .hero-banner img {
+      width: min(760px, 100%);
+      height: auto;
+      border-radius: 12px;
+      border: 1px solid rgba(249, 115, 22, 0.16);
+      display: block;
+    }
     
     .chip {
       display: inline-flex;
@@ -828,6 +847,9 @@ def create_app(config_path: str) -> Flask:
       <a class="nav-item" data-section="settings" href="#">Settings</a>
     </aside>
     <main class="main">
+      <div class="hero-banner">
+        <img src="/branding/banner.svg" alt="Seekarr banner"/>
+      </div>
       
       <section class="content-section active" id="section-dashboard">
         <div class="actions">
@@ -1769,7 +1791,24 @@ def create_app(config_path: str) -> Flask:
 
     @app.get("/favicon.ico")
     def favicon() -> Any:
+        icon = _asset_path("seekarr-logo.svg")
+        if icon.exists():
+            return send_file(icon, mimetype="image/svg+xml")
         return "", 204
+
+    @app.get("/branding/banner.svg")
+    def branding_banner() -> Any:
+        banner = _asset_path("seekarr-banner.svg")
+        if not banner.exists():
+            return jsonify({"error": "Banner asset not found"}), 404
+        return send_file(banner, mimetype="image/svg+xml")
+
+    @app.get("/branding/logo.svg")
+    def branding_logo() -> Any:
+        logo = _asset_path("seekarr-logo.svg")
+        if not logo.exists():
+            return jsonify({"error": "Logo asset not found"}), 404
+        return send_file(logo, mimetype="image/svg+xml")
 
     return app
 

@@ -543,9 +543,7 @@ class Engine:
             triggered_missing = 0
             triggered_cutoff = 0
 
-            sonarr_missing_mode = (
-                str(getattr(instance, "sonarr_missing_mode", "smart") or "smart").strip().lower()
-            )
+            sonarr_missing_mode = str(getattr(instance, "sonarr_missing_mode", "smart") or "smart").strip().lower()
             if sonarr_missing_mode in ("seasons_packs", "seasonpacks", "seasons", "season"):
                 sonarr_missing_mode = "season_packs"
             if sonarr_missing_mode in ("hybrid", "auto"):
@@ -715,8 +713,7 @@ class Engine:
                         season_key = f"season:{int(series_id)}:{int(season_number)}"
                         season_cooldown_hours = int(retry_hours)
                         if any(
-                            self._is_recent_release("sonarr", getattr(e, "air_date_utc", None))
-                            for e in (eps or [])
+                            self._is_recent_release("sonarr", getattr(e, "air_date_utc", None)) for e in (eps or [])
                         ):
                             season_cooldown_hours = min(season_cooldown_hours, int(recent_retry_hours))
                         if self.store.item_on_cooldown(
@@ -1031,8 +1028,10 @@ class Engine:
             return
 
         cooldown_hours = int(retry_hours)
-        release_iso = getattr(wanted_item, "release_date_utc", None) if app_type == "radarr" else getattr(
-            wanted_item, "air_date_utc", None
+        release_iso = (
+            getattr(wanted_item, "release_date_utc", None)
+            if app_type == "radarr"
+            else getattr(wanted_item, "air_date_utc", None)
         )
         if self._is_recent_release(app_type, release_iso, now=now):
             cooldown_hours = min(cooldown_hours, int(recent_retry_hours))

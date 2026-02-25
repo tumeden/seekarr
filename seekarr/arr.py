@@ -1,8 +1,7 @@
 import logging
 import re
-from datetime import date
-from datetime import datetime, timezone
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 

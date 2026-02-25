@@ -911,6 +911,12 @@ def create_app(config_path: str) -> Flask:
     let refreshTimer = null;
     let countdownTimer = null;
     const authStorageKey = 'seekarr_auth_header';
+    function startTimers() {
+      if (timersStarted) return;
+      timersStarted = true;
+      refreshTimer = setInterval(refresh, 5000);
+      countdownTimer = setInterval(tickCountdowns, 1000);
+    }
 
     function loadAuthHeader() {
       try {
@@ -993,6 +999,8 @@ def create_app(config_path: str) -> Flask:
       if (authHeader) {
         const ok = await apiFetch('/api/status').then(r => r.ok).catch(() => false);
         if (ok) {
+          await refresh();
+          startTimers();
           authInFlight = false;
           return;
         }
@@ -1038,11 +1046,7 @@ def create_app(config_path: str) -> Flask:
 
       hideAuthModal();
       await refresh();
-      if (!timersStarted) {
-        timersStarted = true;
-        refreshTimer = setInterval(refresh, 5000);
-        countdownTimer = setInterval(tickCountdowns, 1000);
-      }
+      startTimers();
     }
 
     function asBadge(ok) {

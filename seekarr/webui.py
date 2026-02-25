@@ -910,6 +910,29 @@ def create_app(config_path: str) -> Flask:
     let timersStarted = false;
     let refreshTimer = null;
     let countdownTimer = null;
+    const authStorageKey = 'seekarr_auth_header';
+
+    function loadAuthHeader() {
+      try {
+        const v = localStorage.getItem(authStorageKey);
+        authHeader = (v && typeof v === 'string') ? v : '';
+      } catch (e) {
+        authHeader = '';
+      }
+    }
+
+    function saveAuthHeader() {
+      try {
+        if (authHeader) localStorage.setItem(authStorageKey, authHeader);
+      } catch (e) {}
+    }
+
+    function clearAuthHeader() {
+      authHeader = '';
+      try {
+        localStorage.removeItem(authStorageKey);
+      } catch (e) {}
+    }
 
     function apiFetch(url, opts) {
       const o = opts ? Object.assign({}, opts) : {};
@@ -966,6 +989,15 @@ def create_app(config_path: str) -> Flask:
       if (modal.classList.contains('show')) return;
       if (authInFlight) return;
       authInFlight = true;
+      if (!authHeader) loadAuthHeader();
+      if (authHeader) {
+        const ok = await apiFetch('/api/status').then(r => r.ok).catch(() => false);
+        if (ok) {
+          authInFlight = false;
+          return;
+        }
+        clearAuthHeader();
+      }
       const st = await fetch('/api/auth/status', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}));
       passwordIsSet = !!st.password_set;
       showAuthModal(passwordIsSet ? 'login' : 'set');
@@ -998,10 +1030,11 @@ def create_app(config_path: str) -> Flask:
       const testOk = await apiFetch('/api/status').then(r => r.ok).catch(() => false);
       if (!testOk) {
         err.textContent = 'Invalid password';
-        authHeader = '';
+        clearAuthHeader();
         btn.disabled = false;
         return;
       }
+      saveAuthHeader();
 
       hideAuthModal();
       await refresh();

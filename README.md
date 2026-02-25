@@ -1,6 +1,19 @@
 # Seekarr
 
+<p align="center">
+  <a href="https://github.com/tumeden/seekarr/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/tumeden/seekarr/ci.yml?branch=main&style=flat&logo=github&label=CI"></a>
+  <a href="https://github.com/tumeden/seekarr/releases"><img alt="Latest Release" src="https://img.shields.io/github/v/release/tumeden/seekarr?style=flat&logo=github&logoColor=white&label=Latest%20Release"></a>
+  <img alt="Commits Since Release" src="https://img.shields.io/github/commits-since/tumeden/seekarr/latest?style=flat&logo=github&logoColor=white&label=Commits">
+  <img alt="Commits Per Month" src="https://img.shields.io/github/commit-activity/m/tumeden/seekarr?style=flat&logo=github&logoColor=white&label=Commits%2FMonth">
+  <img alt="Stars" src="https://img.shields.io/github/stars/tumeden/seekarr?style=flat&logo=github&logoColor=white&label=Stars">
+  <a href="https://hub.docker.com/r/tumeden/seekarr"><img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/tumeden/seekarr?style=flat&logo=docker&logoColor=white&label=Docker%20Pulls"></a>
+  <a href="https://ko-fi.com/tumeden"><img alt="Donate" src="https://img.shields.io/badge/Donate-Ko--fi-ff5e5b?style=flat&logo=ko-fi&logoColor=white"></a>
+  <img alt="License" src="https://img.shields.io/github/license/tumeden/seekarr?style=flat&label=License">
+</p>
+
 Seekarr automatically triggers Radarr/Sonarr searches for items already in your library (missing and/or cutoff-unmet), on a schedule, with cooldown + rate limits to avoid API spam.
+
+Looking to clean up stuck or failed downloads? Check out https://github.com/ManiMatter/decluttarr
 
 Scope:
 - Focused strictly on automatic searching via Sonarr/Radarr.

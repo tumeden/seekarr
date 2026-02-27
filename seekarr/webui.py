@@ -2,11 +2,15 @@ import argparse
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import os
+import re
 import secrets
 import threading
 import time
+import urllib.error
+import urllib.request
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -110,6 +114,22 @@ def _verify_password(password: str, password_hash: str) -> bool:
         return hmac.compare_digest(got, expected)
     except Exception:
         return False
+
+
+def _parse_semver_tuple(value: str) -> tuple[int, int, int] | None:
+    s = str(value or "").strip()
+    m = re.match(r"^v?(\d+)\.(\d+)\.(\d+)", s)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2)), int(m.group(3))
+
+
+def _is_newer_version(current: str, latest: str) -> bool:
+    cur = _parse_semver_tuple(current)
+    latest_tuple = _parse_semver_tuple(latest)
+    if not cur or not latest_tuple:
+        return False
+    return latest_tuple > cur
 
 
 def create_app(config_path: str) -> Flask:
@@ -267,6 +287,49 @@ def create_app(config_path: str) -> Flask:
         "active_instance_id": None,
         "active_instance_name": None,
     }
+    current_version = str(os.getenv("SEEKARR_VERSION", "") or "").strip() or "dev"
+    version_lock = threading.Lock()
+    version_state: dict[str, Any] = {
+        "current": current_version,
+        "latest": None,
+        "release_url": "https://github.com/tumeden/seekarr/releases/latest",
+        "update_available": False,
+        "checked_at_epoch": 0.0,
+    }
+
+    def _refresh_version_state() -> None:
+        now = time.time()
+        with version_lock:
+            last = float(version_state.get("checked_at_epoch") or 0.0)
+            if (now - last) < 6 * 3600:
+                return
+            version_state["checked_at_epoch"] = now
+        req = urllib.request.Request(
+            "https://api.github.com/repos/tumeden/seekarr/releases/latest",
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "seekarr-webui"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                payload = json.loads(resp.read().decode("utf-8", "ignore"))
+            latest = str(payload.get("tag_name") or "").strip()
+            release_url = str(payload.get("html_url") or "").strip() or version_state["release_url"]
+            with version_lock:
+                version_state["latest"] = latest or None
+                version_state["release_url"] = release_url
+                version_state["update_available"] = bool(latest and _is_newer_version(current_version, latest))
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError, OSError):
+            return
+
+    def _get_version_state() -> dict[str, Any]:
+        with version_lock:
+            return {
+                "current": version_state.get("current"),
+                "latest": version_state.get("latest"),
+                "release_url": version_state.get("release_url"),
+                "update_available": bool(version_state.get("update_available")),
+            }
+
+    threading.Thread(target=_refresh_version_state, name="seekarr-version-check", daemon=True).start()
 
     app = Flask(__name__)
     assets_dir = Path(__file__).resolve().parent / "assets"
@@ -582,6 +645,37 @@ def create_app(config_path: str) -> Flask:
       color: #fff;
       border-color: rgba(249, 115, 22, 0.40);
       background: rgba(249, 115, 22, 0.18);
+    }
+    .sidebar-badges {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(249, 115, 22, 0.14);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .sidebar-badge {
+      display: inline-block;
+      text-decoration: none;
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      background: rgba(15, 23, 42, 0.45);
+    }
+    .sidebar-badge:hover {
+      border-color: rgba(249, 115, 22, 0.35);
+      color: #fff;
+    }
+    .sidebar-badge.update {
+      border-color: rgba(245, 158, 11, 0.35);
+      background: rgba(245, 158, 11, 0.14);
+      color: rgba(253, 230, 138, 0.98);
+    }
+    .sidebar-badge.update:hover {
+      border-color: rgba(245, 158, 11, 0.55);
     }
     .main { min-width: 0; display: flex; flex-direction: column; }
     .hero-banner {
@@ -974,6 +1068,13 @@ def create_app(config_path: str) -> Flask:
       <a class="nav-item" data-section="instances" href="#">Instances</a>
       <a class="nav-item" data-section="runs" href="#">Search History</a>
       <a class="nav-item" data-section="settings" href="#">Settings</a>
+      <div class="sidebar-badges">
+        <a class="sidebar-badge" href="https://github.com/tumeden/seekarr" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a class="sidebar-badge" href="https://hub.docker.com/r/tumeden/seekarr" target="_blank" rel="noopener noreferrer">Docker Hub</a>
+        <span class="sidebar-badge" id="version-chip">Version --</span>
+        <a class="sidebar-badge update" id="update-chip" href="https://github.com/tumeden/seekarr/releases/latest"
+           target="_blank" rel="noopener noreferrer" style="display:none;">Update available</a>
+      </div>
     </aside>
     <main class="main">
       <div class="hero-banner">
@@ -1341,6 +1442,21 @@ def create_app(config_path: str) -> Flask:
         return;
       }
       const data = await r.json();
+      const ver = data.version || {};
+      const versionChip = document.getElementById('version-chip');
+      if (versionChip) {
+        versionChip.textContent = `Version ${safe(ver.current || '-')}`;
+      }
+      const updateChip = document.getElementById('update-chip');
+      if (updateChip) {
+        if (ver.update_available) {
+          updateChip.style.display = 'inline-block';
+          updateChip.href = String(ver.release_url || 'https://github.com/tumeden/seekarr/releases/latest');
+          updateChip.title = ver.latest ? `Latest: ${ver.latest}` : 'Update available';
+        } else {
+          updateChip.style.display = 'none';
+        }
+      }
       
       const rs = data.run_state || {};
       const autorunToggle = document.getElementById('autorun-toggle');
@@ -1758,6 +1874,7 @@ def create_app(config_path: str) -> Flask:
 
     @app.get("/api/status")
     def status() -> Any:
+        _refresh_version_state()
         with run_state_lock:
             rs = dict(run_state)
         cfg = _get_config()
@@ -1795,6 +1912,7 @@ def create_app(config_path: str) -> Flask:
         return jsonify(
             {
                 "server_time_utc": datetime.now(timezone.utc).isoformat(),
+                "version": _get_version_state(),
                 "config": _config_view(cfg, store),
                 "sync_status": store.get_sync_statuses(),
                 "recent_runs": store.get_recent_runs(20),

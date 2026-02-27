@@ -15,7 +15,7 @@
   <img alt="License" src="https://img.shields.io/github/license/tumeden/seekarr?style=flat&label=License">
 </p>
 
-Seekarr automatically triggers Radarr/Sonarr searches for items already in your library (missing and/or cutoff-unmet), with scheduling, cooldowns, and rate limits.
+Seekarr automatically triggers Radarr/Sonarr searches for monitored items in your library (missing and/or cutoff-unmet), with scheduling, cooldowns, and rate limits.
 
 <!-- screenshots -->
 <img width="1129" height="515" alt="image" src="https://github.com/user-attachments/assets/f754e7dc-5bb7-4f13-9b42-3b3b6fb495ae" />

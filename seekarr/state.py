@@ -518,6 +518,18 @@ class StateStore:
             ).fetchone()
         return int(row["c"] or 0) if row else 0
 
+    def count_search_actions_for_item(self, hunt_type: str, instance_id: int, item_key: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS c
+                FROM search_action
+                WHERE hunt_type = ? AND instance_id = ? AND item_key = ?
+                """,
+                (str(hunt_type), int(instance_id), str(item_key)),
+            ).fetchone()
+        return int(row["c"] or 0) if row else 0
+
     def set_scheduler_heartbeat(self) -> None:
         now = _utc_now()
         with self._connect() as conn:

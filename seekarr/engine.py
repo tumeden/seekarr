@@ -16,6 +16,7 @@ from .state import StateStore
 
 RECENT_PRIORITY_WINDOW_DAYS = 2
 RECENT_RETRY_HOURS = 6
+SONARR_SEASON_PACK_ATTEMPT_FALLBACK = 3
 _FIXED_OFFSET_TZ_RE = re.compile(r"^([+-])(\d{2}):(\d{2})$")
 
 
@@ -43,6 +44,51 @@ def _parse_arr_datetime_utc(value: Any) -> datetime | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+def _episode_order_key(item: Any) -> tuple[int, int, float, int]:
+    season = int(getattr(item, "season_number", 0) or 0)
+    episode = int(getattr(item, "episode_number", 0) or 0)
+    dt = _parse_arr_datetime_utc(getattr(item, "air_date_utc", None))
+    return (
+        season,
+        episode if episode > 0 else 99999,
+        dt.timestamp() if dt else 0.0,
+        int(getattr(item, "episode_id", 0) or 0),
+    )
+
+
+def _prioritize_cold_start_seasons(
+    grouped: list[tuple[tuple[int, int], list[Any]]],
+    cold_start_series_ids: set[int],
+) -> list[tuple[tuple[int, int], list[Any]]]:
+    if not grouped or not cold_start_series_ids:
+        return grouped
+
+    by_series: dict[int, list[tuple[tuple[int, int], list[Any]]]] = {}
+    for entry in grouped:
+        sid = int(entry[0][0])
+        if sid in cold_start_series_ids:
+            by_series.setdefault(sid, []).append(entry)
+
+    for sid, entries in by_series.items():
+        entries.sort(key=lambda x: int(x[0][1]))
+        by_series[sid] = entries
+
+    used: dict[int, int] = {}
+    out: list[tuple[tuple[int, int], list[Any]]] = []
+    for entry in grouped:
+        sid = int(entry[0][0])
+        if sid not in cold_start_series_ids:
+            out.append(entry)
+            continue
+        entries = by_series.get(sid) or []
+        idx = int(used.get(sid, 0))
+        if idx >= len(entries):
+            continue
+        out.append(entries[idx])
+        used[sid] = idx + 1
+    return out
 
 
 def _parse_hhmm(value: str) -> tuple[int, int] | None:
@@ -389,6 +435,43 @@ class Engine:
 
             missing_items = [w for w in wanted if str(getattr(w, "wanted_kind", "missing")).lower() == "missing"]
             cutoff_items = [w for w in wanted if str(getattr(w, "wanted_kind", "missing")).lower() != "missing"]
+            if app_type == "sonarr":
+                queued_episode_ids = client.fetch_queue_episode_ids()
+                if queued_episode_ids:
+                    before_missing = len(missing_items)
+                    before_cutoff = len(cutoff_items)
+                    missing_items = [
+                        ep
+                        for ep in missing_items
+                        if int(getattr(ep, "episode_id", 0) or 0) not in queued_episode_ids
+                    ]
+                    cutoff_items = [
+                        ep
+                        for ep in cutoff_items
+                        if int(getattr(ep, "episode_id", 0) or 0) not in queued_episode_ids
+                    ]
+                    skipped_missing = before_missing - len(missing_items)
+                    skipped_cutoff = before_cutoff - len(cutoff_items)
+                    if (skipped_missing + skipped_cutoff) > 0:
+                        self.logger.info(
+                            "Skipped %s Sonarr wanted episodes already in queue (%s missing, %s cutoff) for %s",
+                            skipped_missing + skipped_cutoff,
+                            skipped_missing,
+                            skipped_cutoff,
+                            instance.instance_name,
+                        )
+                        if progress_cb:
+                            progress_cb(
+                                {
+                                    "type": "items_skipped_existing_queue",
+                                    "app_type": "sonarr",
+                                    "instance_id": instance.instance_id,
+                                    "instance_name": instance.instance_name,
+                                    "queued_total": len(queued_episode_ids),
+                                    "skipped_missing": skipped_missing,
+                                    "skipped_cutoff": skipped_cutoff,
+                                }
+                            )
             search_order = str(getattr(instance, "search_order", "newest") or "newest").strip().lower()
             if search_order not in ("smart", "newest", "oldest", "random"):
                 search_order = "newest"
@@ -661,6 +744,7 @@ class Engine:
                         groups = {k: v for k, v in groups.items() if k[1] != 0}
 
                     grouped = list(groups.items())
+                    season_inventory_cache: dict[int, dict[int, dict[str, int]]] = {}
                     if search_order == "smart":
                         # Use the newest episode air date in the season to bucket recent/random/oldest.
                         recent_cutoff = now_utc - timedelta(days=2)
@@ -729,7 +813,35 @@ class Engine:
 
                         grouped.sort(key=_group_sort_key, reverse=(search_order == "newest"))
 
-                    season_inventory_cache: dict[int, dict[int, dict[str, int]]] = {}
+                    if sonarr_missing_mode == "smart" and grouped:
+                        seasons_by_series: dict[int, set[int]] = {}
+                        for (sid, sn), _ in grouped:
+                            if int(sn) <= 0:
+                                continue
+                            seasons_by_series.setdefault(int(sid), set()).add(int(sn))
+                        cold_start_series_ids: set[int] = set()
+                        for sid, season_nums in seasons_by_series.items():
+                            # Only apply this rule when multiple monitored seasons are in play.
+                            if len(season_nums) < 2:
+                                continue
+                            inv = season_inventory_cache.get(int(sid))
+                            if inv is None:
+                                inv = client.fetch_series_season_inventory(int(sid))
+                                season_inventory_cache[int(sid)] = inv
+                            saw_aired = False
+                            all_empty = True
+                            for sn in sorted(season_nums):
+                                stats_row = inv.get(int(sn)) or {}
+                                aired_total = int(stats_row.get("aired_total") or 0)
+                                aired_downloaded = int(stats_row.get("aired_downloaded") or 0)
+                                if aired_total > 0:
+                                    saw_aired = True
+                                if aired_total <= 0 or aired_downloaded > 0:
+                                    all_empty = False
+                                    break
+                            if saw_aired and all_empty:
+                                cold_start_series_ids.add(int(sid))
+                        grouped = _prioritize_cold_start_seasons(grouped, cold_start_series_ids)
 
                     def _smart_mode_action(series_id: int, season_number: int, eps: list[Any]) -> str:
                         """
@@ -759,8 +871,22 @@ class Engine:
                         season_stats = inv.get(int(season_number)) or {}
                         aired_total = int(season_stats.get("aired_total") or 0)
                         aired_downloaded = int(season_stats.get("aired_downloaded") or 0)
+                        unaired_total = int(season_stats.get("unaired_total") or 0)
+                        pack_attempts = self.store.count_search_actions_for_item(
+                            "sonarr",
+                            instance.instance_id,
+                            season_key,
+                        )
                         # Truly empty season in library: prefer season pack.
                         if aired_total > 0 and aired_downloaded == 0:
+                            # If we've already tried pack searches several times with no progress,
+                            # switch to per-episode to avoid starving seasons without real packs.
+                            if pack_attempts >= SONARR_SEASON_PACK_ATTEMPT_FALLBACK:
+                                return "episodes"
+                            # If the season is still airing, season packs are often unavailable;
+                            # prefer episode searches to avoid repeated no-op pack attempts.
+                            if unaired_total > 0:
+                                return "episodes"
                             return "season_pack"
                         episode_numbers = {
                             int(getattr(e, "episode_number", 0) or 0)
@@ -807,7 +933,7 @@ class Engine:
                                 triggered_missing += 1
                                 # Pacing is enforced inside the handler so it's shared across instances.
                         else:
-                            for ep in eps:
+                            for ep in sorted(eps, key=_episode_order_key):
                                 if triggered_missing >= missing_cap:
                                     break
                                 before = stats.actions_triggered
@@ -921,7 +1047,7 @@ class Engine:
                             series_title=str(getattr(eps[0], "series_title", "") or ""),
                             episode_ids=[
                                 int(getattr(e, "episode_id", 0) or 0)
-                                for e in eps
+                                for e in sorted(eps, key=_episode_order_key)
                                 if int(getattr(e, "episode_id", 0) or 0) > 0
                             ],
                             episode_air_dates_utc=[getattr(e, "air_date_utc", None) for e in eps],
@@ -934,6 +1060,9 @@ class Engine:
                             triggered_missing += 1
                             # Pacing is enforced inside the handler so it's shared across instances.
             else:
+                if app_type == "sonarr":
+                    missing_items = sorted(missing_items, key=_episode_order_key)
+                    cutoff_items = sorted(cutoff_items, key=_episode_order_key)
                 _process(missing_items, missing_cap, "missing")
             _process(cutoff_items, cutoff_cap, "cutoff")
             wakeup_iso = None

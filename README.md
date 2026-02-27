@@ -15,16 +15,7 @@
   <img alt="License" src="https://img.shields.io/github/license/tumeden/seekarr?style=flat&label=License">
 </p>
 
-Seekarr automatically triggers Radarr/Sonarr searches for items already in your library (missing and/or cutoff-unmet), on a schedule, with cooldown + rate limits to avoid API spam.
-
-Looking to clean up stuck or failed downloads? Check out https://github.com/ManiMatter/decluttarr
-
-Scope:
-- Focused strictly on automatic searching via Sonarr/Radarr.
-- No unrelated "arr suite" features (download cleanup, etc).
-
-Transparency:
-- Built with significant AI assistance. Review and use at your own discretion.
+Seekarr automatically triggers Radarr/Sonarr searches for items already in your library (missing and/or cutoff-unmet), with scheduling, cooldowns, and rate limits.
 
 <!-- screenshots -->
 <img width="1129" height="515" alt="image" src="https://github.com/user-attachments/assets/f754e7dc-5bb7-4f13-9b42-3b3b6fb495ae" />
@@ -35,55 +26,16 @@ Transparency:
 
 ## What It Does
 
-- Pulls "wanted" lists from Radarr/Sonarr (missing and/or cutoff-unmet).
-- Triggers searches per instance on its interval.
-- Remembers what it already searched (SQLite cooldown) so it will not retry the same item constantly.
-- Paces requests so large libraries do not cause bursts.
-- Skips unreleased content (default: wait 8 hours after air/release).
-- Uses smart calendar-aware prioritization (already-aired/released near-now items are searched first in `search_order: smart`).
-- For recent releases (past 2 days), retries are more aggressive and cycles can wake early when `air/release + min_hours_after_release` is reached.
-- Can pause searching during quiet hours (default: 23:00 to 06:00). Set `app.quiet_hours_timezone` to pin the timezone (IANA name like `America/New_York`, or fixed offset like `-05:00`).
-
-Sonarr missing mode defaults to `smart`:
-- Empty/mostly-empty seasons prefer season-pack searches.
-- Partial seasons can fall back to episode-level searches.
-- If a season-pack key is on cooldown, Smart skips that season and moves on (instead of episode-searching the same cooled-down season).
+- Pulls wanted lists from Radarr/Sonarr (missing and/or cutoff-unmet).
+- Triggers searches per instance on configured intervals.
+- Tracks item cooldowns in SQLite to avoid repeated spam searches.
+- Applies pacing and rate limits.
+- Skips unreleased content until the configured delay passes.
+- Supports quiet hours (with configurable timezone in Web UI).
 
 ---
 
-## Quick Start (Config)
-
-1. Create your config:
-
-```bash
-cp config.example.yaml config.yaml
-```
-
-2. Edit `config.yaml` and set your Arr URLs:
-
-- If Seekarr runs on a different machine than Radarr/Sonarr, do not use `localhost`.
-- Use an IP/hostname Seekarr can reach (example: `http://192.168.1.50:7878`).
-
-3. Open Web UI and configure everything from **Settings**:
-
-- Arr URL
-- Arr API key (stored encrypted in SQLite)
-- Quiet hours start/end/timezone
-- Search behavior/rate/interval settings
-
----
-
-## Docker (Easiest)
-
-Seekarr publishes Docker images. `:latest` tracks the newest `v*` release tag.
-
-Pull:
-
-```bash
-docker pull tumeden/seekarr:latest
-```
-
-Minimal `docker-compose.yml` (Web UI):
+## Docker Quick Start
 
 ```yaml
 services:
@@ -97,70 +49,42 @@ services:
       - ./data:/data
 ```
 
-Notes:
-- Persist `./data` (it contains `config.yaml`, `seekarr.db`, and `seekarr.masterkey`).
-- Seekarr auto-creates `./data/config.yaml` on first start if it is missing.
-- Web UI settings are persisted in `seekarr.db` (SQLite), not written back to `config.yaml`.
-- Quiet hours use your configured `app.quiet_hours_timezone` (if set), otherwise the container timezone.
-- First load prompts you to set a Web UI password (stored as a salted hash in SQLite).
-- Put keys/password in `./data/.env` only if you want to pre-seed them (optional):
+Then:
 
-```env
-SEEKARR_WEBUI_PASSWORD=change-me
-RADARR_API_KEY_1=your-radarr-key
-SONARR_API_KEY_1=your-sonarr-key
-```
-
-Permissions note (Docker/Portainer):
-- Seekarr runs as a non-root user (UID `10001`). Your `/data` volume must be writable by that user.
-- Bind mount example (host path `/opt/seekarr`):
-
-```bash
-sudo mkdir -p /opt/seekarr
-sudo chown -R 10001:10001 /opt/seekarr
-sudo chmod -R u+rwX /opt/seekarr
-```
+1. Start container.
+2. Open `http://localhost:8788`.
+3. Set Web UI password.
+4. Configure Radarr/Sonarr instances and settings in **Settings**.
 
 ---
 
-## Security And Credentials (How It Works)
+## Persistence
 
-On first load of the Web UI, Seekarr prompts you to set a password. This password is stored as a salted PBKDF2 hash in the SQLite DB (it is not reversible and is never returned by the UI/API). If you forget it, there is no "forgot password" flow.
+Persist `./data`.
 
-Seekarr stores Arr API keys you enter in the Web UI encrypted in the same SQLite DB. The encryption key is auto-generated on first run and stored in `seekarr.masterkey` next to the DB (for Docker, that lives in your `./data` volume). If you delete or lose `seekarr.masterkey`, Seekarr cannot decrypt the saved Arr API keys and you will need to re-enter them.
+It contains:
 
-If you forget your Web UI password, reset it by deleting the stored password hash:
-- Simple reset (wipes Seekarr state): stop Seekarr and delete `seekarr.db` in your data directory, then start Seekarr again.
-- Advanced reset (keeps state): stop Seekarr, open `seekarr.db` with a SQLite tool, and delete the row from the `webui_auth` table.
+- `config.yaml` (base startup config; auto-created if missing)
+- `seekarr.db` (state + Web UI settings)
+- `seekarr.masterkey` (key used to decrypt stored Arr API keys)
+
+Web UI setting changes are stored in `seekarr.db`.
 
 ---
 
-## Windows (Quick Run)
+## Security
 
-1. Install Python 3.11+
-2. Install deps:
-
-```bat
-python -m pip install -r requirements.txt
-```
-
-3. Run (pick one):
-- `run.bat`
+- Web UI requires a password (stored as salted hash in SQLite).
+- Arr API keys entered in Web UI are stored encrypted in SQLite.
+- Do not lose `seekarr.masterkey`, or stored API keys cannot be decrypted.
 
 ---
 
 ## Common Errors
 
-- Connection refused/unreachable: the Arr URL/port is wrong, or Radarr/Sonarr is not reachable from where Seekarr runs.
-- HTTP 401/403: API key is wrong or lacks permission.
+- Connection refused/unreachable: Arr URL/port is wrong or unreachable from container.
+- HTTP 401/403: Arr API key is invalid.
 
 ---
 
-## Technical Notes
-
-- The Web UI binds to localhost by default. `--allow-public` is required to bind to non-localhost, to avoid accidentally exposing `/api/*` endpoints.
-- The Web UI password is stored as a salted hash in the SQLite DB (it cannot be retrieved via the API/UI).
-- API keys set in the Web UI are stored encrypted in the SQLite DB (they cannot be retrieved via the API/UI).
-- API key encryption uses a master key file stored next to the DB: `seekarr.masterkey`. If you lose this file, you must re-enter API keys.
-- `config.yaml` supports `${ENV_VAR}` interpolation.
-
+Looking to clean up stuck/failed downloads? Check out https://github.com/ManiMatter/decluttarr

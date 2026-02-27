@@ -30,6 +30,38 @@ def _as_bool(value: Any) -> bool | None:
     return None
 
 
+def _is_cutoff_still_unmet(row: dict[str, Any]) -> bool:
+    """
+    Best-effort guard for cutoff endpoints.
+    Return False when payload explicitly says cutoff is already met.
+    """
+    # Some Arr versions expose explicit unmet flags.
+    unmet_flags: list[bool] = []
+    for key in ("qualityCutoffNotMet", "customFormatCutoffNotMet", "customFormatsCutoffNotMet"):
+        flag = _as_bool(row.get(key))
+        if flag is not None:
+            unmet_flags.append(flag)
+
+    file_obj = {}
+    if isinstance(row.get("movieFile"), dict):
+        file_obj = row.get("movieFile") or {}
+    elif isinstance(row.get("episodeFile"), dict):
+        file_obj = row.get("episodeFile") or {}
+
+    # Cutoff upgrades should only be relevant for items that already have a file.
+    has_file = _as_bool(row.get("hasFile"))
+    if has_file is None and file_obj:
+        has_file = _as_bool(file_obj.get("hasFile"))
+    if has_file is False:
+        return False
+
+    # If explicit flags exist and all are False, cutoff is met.
+    if unmet_flags and (not any(unmet_flags)):
+        return False
+
+    return True
+
+
 @dataclass(frozen=True)
 class WantedMovie:
     movie_id: int
@@ -313,6 +345,8 @@ class ArrClient:
                     continue
                 if wanted_kind == "cutoff" and movie_id in out:
                     continue
+                if wanted_kind == "cutoff" and (not _is_cutoff_still_unmet(row)):
+                    continue
                 # Only act on monitored movies.
                 meta = movie_meta.get(movie_id) or {}
                 monitored = meta.get("monitored")
@@ -363,6 +397,8 @@ class ArrClient:
                 if not episode_id:
                     continue
                 if wanted_kind == "cutoff" and episode_id in out:
+                    continue
+                if wanted_kind == "cutoff" and (not _is_cutoff_still_unmet(row)):
                     continue
                 # Episode/series monitoring flags differ by Sonarr version and endpoint.
                 # We enforce:

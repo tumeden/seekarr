@@ -150,7 +150,9 @@ def create_app(config_path: str) -> Flask:
                             int(inst.min_hours_after_release) if inst.min_hours_after_release is not None else None
                         ),
                         "min_seconds_between_actions": (
-                            int(inst.min_seconds_between_actions) if inst.min_seconds_between_actions is not None else None
+                            int(inst.min_seconds_between_actions)
+                            if inst.min_seconds_between_actions is not None
+                            else None
                         ),
                         "max_missing_actions_per_instance_per_sync": (
                             int(inst.max_missing_actions_per_instance_per_sync)

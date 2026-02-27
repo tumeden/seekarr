@@ -145,8 +145,7 @@ python -m pip install -r requirements.txt
 ```
 
 3. Run (pick one):
-- `run-webui.bat`
-- `run-console.bat` (dev alias; starts Web UI)
+- `run.bat`
 
 ---
 
@@ -164,3 +163,4 @@ python -m pip install -r requirements.txt
 - API keys set in the Web UI are stored encrypted in the SQLite DB (they cannot be retrieved via the API/UI).
 - API key encryption uses a master key file stored next to the DB: `seekarr.masterkey`. If you lose this file, you must re-enter API keys.
 - `config.yaml` supports `${ENV_VAR}` interpolation.
+

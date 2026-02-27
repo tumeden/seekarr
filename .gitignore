@@ -36,7 +36,6 @@ ENV/
 .DS_Store
 Thumbs.db
 *.swp
-*.bat
 
 # Legacy local env scripts (not used by Seekarr)
 set-env*.ps1

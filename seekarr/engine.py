@@ -441,14 +441,10 @@ class Engine:
                     before_missing = len(missing_items)
                     before_cutoff = len(cutoff_items)
                     missing_items = [
-                        ep
-                        for ep in missing_items
-                        if int(getattr(ep, "episode_id", 0) or 0) not in queued_episode_ids
+                        ep for ep in missing_items if int(getattr(ep, "episode_id", 0) or 0) not in queued_episode_ids
                     ]
                     cutoff_items = [
-                        ep
-                        for ep in cutoff_items
-                        if int(getattr(ep, "episode_id", 0) or 0) not in queued_episode_ids
+                        ep for ep in cutoff_items if int(getattr(ep, "episode_id", 0) or 0) not in queued_episode_ids
                     ]
                     skipped_missing = before_missing - len(missing_items)
                     skipped_cutoff = before_cutoff - len(cutoff_items)

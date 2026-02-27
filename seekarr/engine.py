@@ -1,10 +1,12 @@
 import logging
 import random
+import re
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .arr import (
     ArrClient,
@@ -14,6 +16,7 @@ from .state import StateStore
 
 RECENT_PRIORITY_WINDOW_DAYS = 2
 RECENT_RETRY_HOURS = 6
+_FIXED_OFFSET_TZ_RE = re.compile(r"^([+-])(\d{2}):(\d{2})$")
 
 
 def _parse_arr_datetime_utc(value: Any) -> datetime | None:
@@ -59,7 +62,9 @@ def _parse_hhmm(value: str) -> tuple[int, int] | None:
     return hh, mm
 
 
-def _quiet_hours_end_utc(now_utc: datetime, start_hhmm: str, end_hhmm: str) -> datetime | None:
+def _quiet_hours_end_utc(
+    now_utc: datetime, start_hhmm: str, end_hhmm: str, quiet_timezone: str = ""
+) -> datetime | None:
     """
     If now is within quiet hours (in local timezone), return the end datetime in UTC.
     Quiet hours are inclusive of the start instant and exclusive of the end instant.
@@ -70,7 +75,23 @@ def _quiet_hours_end_utc(now_utc: datetime, start_hhmm: str, end_hhmm: str) -> d
     if not st or not et:
         return None
 
-    local_now = now_utc.astimezone()  # system local timezone
+    tz_name = (quiet_timezone or "").strip()
+    local_tz = now_utc.astimezone().tzinfo or timezone.utc
+    if tz_name.upper() in ("UTC", "Z"):
+        local_tz = timezone.utc
+    elif tz_name:
+        m = _FIXED_OFFSET_TZ_RE.match(tz_name)
+        if m:
+            sign = -1 if m.group(1) == "-" else 1
+            hh = int(m.group(2))
+            mm = int(m.group(3))
+            if 0 <= hh <= 23 and 0 <= mm <= 59:
+                local_tz = timezone(sign * timedelta(hours=hh, minutes=mm), name=tz_name)
+        try:
+            local_tz = ZoneInfo(tz_name)
+        except ZoneInfoNotFoundError:
+            pass
+    local_now = now_utc.astimezone(local_tz)
     start_local_today = local_now.replace(hour=st[0], minute=st[1], second=0, microsecond=0)
     end_local_today = local_now.replace(hour=et[0], minute=et[1], second=0, microsecond=0)
 
@@ -320,7 +341,13 @@ class Engine:
         try:
             quiet_start = str(getattr(instance, "quiet_hours_start", None) or self.config.app.quiet_hours_start or "")
             quiet_end = str(getattr(instance, "quiet_hours_end", None) or self.config.app.quiet_hours_end or "")
-            quiet_end_utc = _quiet_hours_end_utc(datetime.now(timezone.utc), quiet_start, quiet_end)
+            quiet_tz = str(getattr(self.config.app, "quiet_hours_timezone", "") or "")
+            quiet_end_utc = _quiet_hours_end_utc(
+                datetime.now(timezone.utc),
+                quiet_start,
+                quiet_end,
+                quiet_timezone=quiet_tz,
+            )
             if quiet_end_utc and (not force):
                 self.store.set_next_sync_time(app_type, instance.instance_id, quiet_end_utc.isoformat())
                 status = "quiet_hours"

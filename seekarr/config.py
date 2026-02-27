@@ -16,6 +16,7 @@ class AppConfig:
     min_hours_after_release: int
     quiet_hours_start: str
     quiet_hours_end: str
+    quiet_hours_timezone: str
     max_missing_actions_per_instance_per_sync: int
     max_cutoff_actions_per_instance_per_sync: int
     min_seconds_between_actions: int
@@ -161,6 +162,7 @@ def _ensure_config_exists(config_path: Path) -> None:
                 "request_timeout_seconds": 30,
                 "verify_ssl": True,
                 "log_level": "INFO",
+                "quiet_hours_timezone": "",
             },
             "radarr": {
                 "instances": [
@@ -237,6 +239,7 @@ def load_config(path: str) -> RuntimeConfig:
         min_hours_after_release=max(0, int(app_raw.get("min_hours_after_release", 8))),
         quiet_hours_start=_require_str(app_raw, "quiet_hours_start", "23:00"),
         quiet_hours_end=_require_str(app_raw, "quiet_hours_end", "06:00"),
+        quiet_hours_timezone=_require_str(app_raw, "quiet_hours_timezone", ""),
         # Per-run caps per instance, split by wanted kind.
         # This prevents "upgrade spam" when cutoff-unmet lists are huge.
         max_missing_actions_per_instance_per_sync=max(

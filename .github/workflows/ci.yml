@@ -44,5 +44,4 @@ jobs:
         run: |
           python -m pytest -q
           python -m compileall -q .
-          python main.py --help >/dev/null
           python webui_main.py --help >/dev/null

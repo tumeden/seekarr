@@ -19,8 +19,7 @@ jobs:
           set -eux
           VERSION="${GITHUB_REF_NAME}"
           mkdir -p dist/seekarr
-          cp -a README.md requirements.txt Dockerfile docker-compose.yml install.sh config.example.yaml dist/seekarr/
-          cp -a systemd dist/seekarr/
+          cp -a README.md requirements.txt Dockerfile docker-compose.yml config.example.yaml dist/seekarr/
           cp -a seekarr dist/seekarr/
           (cd dist && zip -r "seekarr-${VERSION}.zip" seekarr)
           (cd dist && sha256sum "seekarr-${VERSION}.zip" > "seekarr-${VERSION}.zip.sha256")

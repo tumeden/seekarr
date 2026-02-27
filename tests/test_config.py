@@ -112,3 +112,33 @@ sonarr:
 
     cfg = load_config(str(cfg_path))
     assert cfg.sonarr_instances[0].sonarr_missing_mode == "smart"
+
+
+def test_quiet_hours_timezone_parsed(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        """
+app:
+  db_path: "./state/seekarr.db"
+  request_timeout_seconds: 30
+  verify_ssl: true
+  log_level: INFO
+  quiet_hours_timezone: "America/New_York"
+
+radarr:
+  instances:
+    - instance_id: 1
+      instance_name: Radarr Main
+      enabled: true
+      interval_minutes: 15
+      search_missing: true
+      search_cutoff_unmet: true
+      radarr:
+        url: http://localhost:7878
+        api_key: "abc"
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+    assert cfg.app.quiet_hours_timezone == "America/New_York"

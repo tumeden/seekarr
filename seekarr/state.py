@@ -105,6 +105,33 @@ class StateStore:
                     password_hash TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS ui_app_settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    quiet_hours_timezone TEXT,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS ui_instance_settings (
+                    app_type TEXT NOT NULL,
+                    instance_id INTEGER NOT NULL,
+                    enabled INTEGER,
+                    interval_minutes INTEGER,
+                    search_missing INTEGER,
+                    search_cutoff_unmet INTEGER,
+                    search_order TEXT,
+                    quiet_hours_start TEXT,
+                    quiet_hours_end TEXT,
+                    min_hours_after_release INTEGER,
+                    min_seconds_between_actions INTEGER,
+                    max_missing_actions_per_instance_per_sync INTEGER,
+                    max_cutoff_actions_per_instance_per_sync INTEGER,
+                    sonarr_missing_mode TEXT,
+                    item_retry_hours INTEGER,
+                    rate_window_minutes INTEGER,
+                    rate_cap INTEGER,
+                    arr_url TEXT,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (app_type, instance_id)
+                );
                 """
             )
 
@@ -207,6 +234,127 @@ class StateStore:
                 "DELETE FROM arr_credentials WHERE app_type = ? AND instance_id = ?",
                 (str(app_type), int(instance_id)),
             )
+
+    def get_ui_app_settings(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT quiet_hours_timezone FROM ui_app_settings WHERE id = 1").fetchone()
+        if not row:
+            return {}
+        return {
+            "quiet_hours_timezone": (str(row["quiet_hours_timezone"]).strip() if row["quiet_hours_timezone"] else ""),
+        }
+
+    def set_ui_app_settings(self, quiet_hours_timezone: str | None = None) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO ui_app_settings(id, quiet_hours_timezone, updated_at)
+                VALUES(1, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    quiet_hours_timezone=excluded.quiet_hours_timezone,
+                    updated_at=excluded.updated_at
+                """,
+                (str(quiet_hours_timezone or "").strip(), _utc_now()),
+            )
+
+    def upsert_ui_instance_settings(self, app_type: str, instance_id: int, values: dict[str, Any]) -> None:
+        if str(app_type).strip().lower() not in ("radarr", "sonarr"):
+            raise ValueError("Invalid app_type")
+        iid = int(instance_id)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO ui_instance_settings(
+                    app_type, instance_id,
+                    enabled, interval_minutes, search_missing, search_cutoff_unmet, search_order,
+                    quiet_hours_start, quiet_hours_end,
+                    min_hours_after_release, min_seconds_between_actions,
+                    max_missing_actions_per_instance_per_sync, max_cutoff_actions_per_instance_per_sync,
+                    sonarr_missing_mode, item_retry_hours, rate_window_minutes, rate_cap, arr_url, updated_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(app_type, instance_id) DO UPDATE SET
+                    enabled=excluded.enabled,
+                    interval_minutes=excluded.interval_minutes,
+                    search_missing=excluded.search_missing,
+                    search_cutoff_unmet=excluded.search_cutoff_unmet,
+                    search_order=excluded.search_order,
+                    quiet_hours_start=excluded.quiet_hours_start,
+                    quiet_hours_end=excluded.quiet_hours_end,
+                    min_hours_after_release=excluded.min_hours_after_release,
+                    min_seconds_between_actions=excluded.min_seconds_between_actions,
+                    max_missing_actions_per_instance_per_sync=excluded.max_missing_actions_per_instance_per_sync,
+                    max_cutoff_actions_per_instance_per_sync=excluded.max_cutoff_actions_per_instance_per_sync,
+                    sonarr_missing_mode=excluded.sonarr_missing_mode,
+                    item_retry_hours=excluded.item_retry_hours,
+                    rate_window_minutes=excluded.rate_window_minutes,
+                    rate_cap=excluded.rate_cap,
+                    arr_url=excluded.arr_url,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    str(app_type).strip().lower(),
+                    iid,
+                    values.get("enabled"),
+                    values.get("interval_minutes"),
+                    values.get("search_missing"),
+                    values.get("search_cutoff_unmet"),
+                    values.get("search_order"),
+                    values.get("quiet_hours_start"),
+                    values.get("quiet_hours_end"),
+                    values.get("min_hours_after_release"),
+                    values.get("min_seconds_between_actions"),
+                    values.get("max_missing_actions_per_instance_per_sync"),
+                    values.get("max_cutoff_actions_per_instance_per_sync"),
+                    values.get("sonarr_missing_mode"),
+                    values.get("item_retry_hours"),
+                    values.get("rate_window_minutes"),
+                    values.get("rate_cap"),
+                    values.get("arr_url"),
+                    _utc_now(),
+                ),
+            )
+
+    def get_all_ui_instance_settings(self) -> dict[tuple[str, int], dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    app_type, instance_id,
+                    enabled, interval_minutes, search_missing, search_cutoff_unmet, search_order,
+                    quiet_hours_start, quiet_hours_end,
+                    min_hours_after_release, min_seconds_between_actions,
+                    max_missing_actions_per_instance_per_sync, max_cutoff_actions_per_instance_per_sync,
+                    sonarr_missing_mode, item_retry_hours, rate_window_minutes, rate_cap, arr_url
+                FROM ui_instance_settings
+                """
+            ).fetchall()
+        out: dict[tuple[str, int], dict[str, Any]] = {}
+        for row in rows:
+            app_type = str(row["app_type"] or "").strip().lower()
+            try:
+                instance_id = int(row["instance_id"])
+            except (TypeError, ValueError):
+                continue
+            out[(app_type, instance_id)] = {
+                "enabled": row["enabled"],
+                "interval_minutes": row["interval_minutes"],
+                "search_missing": row["search_missing"],
+                "search_cutoff_unmet": row["search_cutoff_unmet"],
+                "search_order": row["search_order"],
+                "quiet_hours_start": row["quiet_hours_start"],
+                "quiet_hours_end": row["quiet_hours_end"],
+                "min_hours_after_release": row["min_hours_after_release"],
+                "min_seconds_between_actions": row["min_seconds_between_actions"],
+                "max_missing_actions_per_instance_per_sync": row["max_missing_actions_per_instance_per_sync"],
+                "max_cutoff_actions_per_instance_per_sync": row["max_cutoff_actions_per_instance_per_sync"],
+                "sonarr_missing_mode": row["sonarr_missing_mode"],
+                "item_retry_hours": row["item_retry_hours"],
+                "rate_window_minutes": row["rate_window_minutes"],
+                "rate_cap": row["rate_cap"],
+                "arr_url": row["arr_url"],
+            }
+        return out
 
     def prune_old_guids(self, ttl_hours: int) -> int:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=ttl_hours)
@@ -320,6 +468,30 @@ class StateStore:
                 LIMIT ?
                 """,
                 (str(hunt_type), int(instance_id), max(1, int(limit))),
+            ).fetchall()
+        return [
+            {
+                "id": int(r["id"]),
+                "app_type": r["hunt_type"],
+                "instance_id": int(r["instance_id"]),
+                "instance_name": r["instance_name"],
+                "item_key": r["item_key"],
+                "title": r["title"],
+                "occurred_at": r["occurred_at"],
+            }
+            for r in rows
+        ]
+
+    def get_recent_search_actions_global(self, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, hunt_type, instance_id, instance_name, item_key, title, occurred_at
+                FROM search_action
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (max(1, int(limit)),),
             ).fetchall()
         return [
             {

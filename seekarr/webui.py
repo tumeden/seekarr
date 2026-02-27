@@ -7,11 +7,11 @@ import os
 import secrets
 import threading
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-import yaml
 from flask import Flask, jsonify, request, send_file
 
 from .arr import ArrRequestError
@@ -78,7 +78,12 @@ def _config_view(config: RuntimeConfig, store: StateStore) -> dict[str, Any]:
         rows.append(_instance_row("radarr", inst))
     for inst in config.sonarr_instances:
         rows.append(_instance_row("sonarr", inst))
-    return {"instances": rows}
+    return {
+        "app": {
+            "quiet_hours_timezone": str(getattr(config.app, "quiet_hours_timezone", "") or ""),
+        },
+        "instances": rows,
+    }
 
 
 def _hash_password(password: str) -> str:
@@ -109,13 +114,136 @@ def _verify_password(password: str, password_hash: str) -> bool:
 
 def create_app(config_path: str) -> Flask:
     config_path = str(Path(config_path).resolve())
-    config = load_config(config_path)
-    setup_logging(config.app.log_level)
+    base_config = load_config(config_path)
+    setup_logging(base_config.app.log_level)
     logger = logging.getLogger("seekarr.webui")
     wz = logging.getLogger("werkzeug")
     wz.addFilter(_QuietAccessFilter())
+    store = StateStore(base_config.app.db_path)
+
+    def _bootstrap_ui_settings_from_yaml(cfg: RuntimeConfig) -> None:
+        """
+        One-time migration path:
+        - Seed DB-backed UI settings from YAML-configured values when missing.
+        - Never overwrite existing DB values.
+        """
+        existing = store.get_all_ui_instance_settings()
+        app_existing = store.get_ui_app_settings()
+        if not str(app_existing.get("quiet_hours_timezone") or "").strip():
+            store.set_ui_app_settings(quiet_hours_timezone=str(cfg.app.quiet_hours_timezone or "").strip())
+
+        def _seed_instance(app_type: str, inst: Any) -> None:
+            key = (app_type, int(inst.instance_id))
+            if key not in existing:
+                store.upsert_ui_instance_settings(
+                    app_type,
+                    int(inst.instance_id),
+                    {
+                        "enabled": 1 if bool(inst.enabled) else 0,
+                        "interval_minutes": int(inst.interval_minutes),
+                        "search_missing": 1 if bool(inst.search_missing) else 0,
+                        "search_cutoff_unmet": 1 if bool(inst.search_cutoff_unmet) else 0,
+                        "search_order": str(inst.search_order or "smart").strip().lower(),
+                        "quiet_hours_start": str(inst.quiet_hours_start or "").strip(),
+                        "quiet_hours_end": str(inst.quiet_hours_end or "").strip(),
+                        "min_hours_after_release": (
+                            int(inst.min_hours_after_release) if inst.min_hours_after_release is not None else None
+                        ),
+                        "min_seconds_between_actions": (
+                            int(inst.min_seconds_between_actions) if inst.min_seconds_between_actions is not None else None
+                        ),
+                        "max_missing_actions_per_instance_per_sync": (
+                            int(inst.max_missing_actions_per_instance_per_sync)
+                            if inst.max_missing_actions_per_instance_per_sync is not None
+                            else None
+                        ),
+                        "max_cutoff_actions_per_instance_per_sync": (
+                            int(inst.max_cutoff_actions_per_instance_per_sync)
+                            if inst.max_cutoff_actions_per_instance_per_sync is not None
+                            else None
+                        ),
+                        "sonarr_missing_mode": str(inst.sonarr_missing_mode or "smart").strip().lower(),
+                        "item_retry_hours": int(inst.item_retry_hours) if inst.item_retry_hours is not None else None,
+                        "rate_window_minutes": (
+                            int(inst.rate_window_minutes) if inst.rate_window_minutes is not None else None
+                        ),
+                        "rate_cap": int(inst.rate_cap) if inst.rate_cap is not None else None,
+                        "arr_url": str(inst.arr.url or "").strip(),
+                    },
+                )
+            if (not store.has_arr_api_key(app_type, int(inst.instance_id))) and str(inst.arr.api_key or "").strip():
+                store.set_arr_api_key(app_type, int(inst.instance_id), str(inst.arr.api_key).strip())
+
+        for inst in cfg.radarr_instances:
+            _seed_instance("radarr", inst)
+        for inst in cfg.sonarr_instances:
+            _seed_instance("sonarr", inst)
+
+    _bootstrap_ui_settings_from_yaml(base_config)
+
+    def _with_ui_overrides(cfg: RuntimeConfig) -> RuntimeConfig:
+        app_overrides = store.get_ui_app_settings()
+        qtz = str(app_overrides.get("quiet_hours_timezone") or "").strip()
+        app_cfg = replace(cfg.app, quiet_hours_timezone=qtz or cfg.app.quiet_hours_timezone)
+
+        raw_overrides = store.get_all_ui_instance_settings()
+
+        def _to_bool(value: Any) -> bool | None:
+            if value is None:
+                return None
+            try:
+                return bool(int(value))
+            except (TypeError, ValueError):
+                return bool(value)
+
+        def _to_int(value: Any) -> int | None:
+            if value is None:
+                return None
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        def _apply_instance(app_type: str, inst: Any) -> Any:
+            ov = raw_overrides.get((app_type, int(inst.instance_id)))
+            if not ov:
+                return inst
+            updates: dict[str, Any] = {}
+
+            for f in ("enabled", "search_missing", "search_cutoff_unmet"):
+                b = _to_bool(ov.get(f))
+                if b is not None:
+                    updates[f] = b
+            for f in (
+                "interval_minutes",
+                "min_hours_after_release",
+                "min_seconds_between_actions",
+                "max_missing_actions_per_instance_per_sync",
+                "max_cutoff_actions_per_instance_per_sync",
+                "item_retry_hours",
+                "rate_window_minutes",
+                "rate_cap",
+            ):
+                iv = _to_int(ov.get(f))
+                if iv is not None:
+                    updates[f] = iv
+            for f in ("search_order", "quiet_hours_start", "quiet_hours_end", "sonarr_missing_mode"):
+                v = ov.get(f)
+                if v is not None:
+                    updates[f] = str(v).strip()
+
+            arr_url = ov.get("arr_url")
+            if arr_url is not None and str(arr_url).strip():
+                updates["arr"] = replace(inst.arr, url=str(arr_url).strip())
+
+            return replace(inst, **updates) if updates else inst
+
+        radarr_instances = [_apply_instance("radarr", inst) for inst in cfg.radarr_instances]
+        sonarr_instances = [_apply_instance("sonarr", inst) for inst in cfg.sonarr_instances]
+        return replace(cfg, app=app_cfg, radarr_instances=radarr_instances, sonarr_instances=sonarr_instances)
+
+    config = _with_ui_overrides(base_config)
     engine = Engine(config=config, logger=logger)
-    store = StateStore(config.app.db_path)
     config_lock = threading.Lock()
     run_lock = threading.Lock()
     run_state_lock = threading.Lock()
@@ -130,7 +258,7 @@ def create_app(config_path: str) -> Flask:
         "last_title": None,
         "recent_actions": [],
         "error": None,
-        "autorun_enabled": os.getenv("WEBUI_AUTORUN_DEFAULT", "1").strip().lower() not in ("0", "false", "no", "off"),
+        "autorun_enabled": True,
         "autorun_last_check": None,
         "autorun_last_run_started": None,
         "active_app_type": None,
@@ -218,11 +346,10 @@ def create_app(config_path: str) -> Flask:
 
     def _reload_config() -> None:
         nonlocal config
-        new_config = load_config(config_path)
-        # We intentionally do not support changing db_path via Web UI. If db_path changes,
-        # the caller should restart services with the new config.
-        if Path(new_config.app.db_path).resolve() != Path(config.app.db_path).resolve():
-            raise ValueError("Changing app.db_path via Web UI is not supported. Edit config and restart.")
+        new_base = load_config(config_path)
+        if Path(new_base.app.db_path).resolve() != Path(base_config.app.db_path).resolve():
+            raise ValueError("Changing app.db_path requires a restart.")
+        new_config = _with_ui_overrides(new_base)
         with config_lock:
             config = new_config
             engine.config = new_config
@@ -895,6 +1022,19 @@ def create_app(config_path: str) -> Flask:
           <div class="cards-grid" id="settings-instance-cards"></div>
         </div>
 
+        <div class="card" style="margin-top:12px;">
+          <h3>App</h3>
+          <div class="field">
+            <div class="label">Quiet Hours Timezone</div>
+            <input id="settings-quiet-timezone" class="cfg mono" type="text" list="timezone-options"
+                   placeholder="Search timezone (example: America/New_York)"/>
+            <datalist id="timezone-options"></datalist>
+          </div>
+          <div class="subline" style="margin-top:6px;">
+            Used for quiet start/end evaluation. Leave empty to use server/container local timezone.
+          </div>
+        </div>
+
         <div class="actions" style="justify-content:flex-end; margin-top:12px;">
           <button class="btn-mini" id="save-settings">SAVE</button>
           <span class="subline" id="settings-msg" style="margin-left:10px;"></span>
@@ -908,9 +1048,39 @@ def create_app(config_path: str) -> Flask:
     let authInFlight = false;
     let authMode = '';
     let timersStarted = false;
+    let timezoneOptionsLoaded = false;
     let refreshTimer = null;
     let countdownTimer = null;
     const authStorageKey = 'seekarr_auth_header';
+    const timezoneFallback = [
+      'UTC', 'Etc/UTC',
+      'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Phoenix',
+      'America/Anchorage', 'Pacific/Honolulu',
+      'Europe/London', 'Europe/Paris', 'Europe/Berlin',
+      'Asia/Tokyo', 'Asia/Seoul', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Shanghai',
+      'Australia/Sydney', 'Australia/Perth'
+    ];
+    function populateTimezoneOptions() {
+      if (timezoneOptionsLoaded) return;
+      timezoneOptionsLoaded = true;
+      const dl = document.getElementById('timezone-options');
+      if (!dl) return;
+      let zones = [];
+      try {
+        if (Intl && typeof Intl.supportedValuesOf === 'function') {
+          zones = Intl.supportedValuesOf('timeZone') || [];
+        }
+      } catch (e) {}
+      if (!zones.length) zones = timezoneFallback.slice();
+      zones = Array.from(new Set([...zones, ...timezoneFallback])).sort((a, b) => a.localeCompare(b));
+      const frag = document.createDocumentFragment();
+      for (const z of zones) {
+        const o = document.createElement('option');
+        o.value = z;
+        frag.appendChild(o);
+      }
+      dl.appendChild(frag);
+    }
     function startTimers() {
       if (timersStarted) return;
       timersStarted = true;
@@ -1320,7 +1490,14 @@ def create_app(config_path: str) -> Flask:
       }
 
       const actionsEl = document.getElementById('recent-actions');
-      const actions = Array.isArray(rs.recent_actions) ? rs.recent_actions : [];
+      const actions = Array.isArray(data.recent_actions)
+        ? data.recent_actions.map(a => ({
+            ts: a.occurred_at,
+            app_type: a.app_type,
+            instance_name: a.instance_name,
+            title: a.title,
+          }))
+        : (Array.isArray(rs.recent_actions) ? rs.recent_actions : []);
       if (!actions.length) {
         actionsEl.textContent = '-';
       } else {
@@ -1376,8 +1553,11 @@ def create_app(config_path: str) -> Flask:
     ensureAuth();
 
     async function loadSettings() {
+      populateTimezoneOptions();
       const r = await apiFetch('/api/settings', { cache:'no-store' });
       const data = await r.json();
+      const appCfg = data.app || {};
+      document.getElementById('settings-quiet-timezone').value = String(appCfg.quiet_hours_timezone || '').trim();
 
       const wrap = document.getElementById('settings-instance-cards');
       wrap.innerHTML = '';
@@ -1543,6 +1723,9 @@ def create_app(config_path: str) -> Flask:
       });
 
       const payload = {
+        app: {
+          quiet_hours_timezone: String(document.getElementById('settings-quiet-timezone')?.value || '').trim(),
+        },
         instances,
       };
 
@@ -1613,6 +1796,7 @@ def create_app(config_path: str) -> Flask:
                 "config": _config_view(cfg, store),
                 "sync_status": store.get_sync_statuses(),
                 "recent_runs": store.get_recent_runs(20),
+                "recent_actions": store.get_recent_search_actions_global(50),
                 "rate_status": rate_status,
                 "instance_last_run": instance_last_run,
                 "search_history": search_history,
@@ -1624,152 +1808,57 @@ def create_app(config_path: str) -> Flask:
     @app.get("/api/settings")
     def get_settings() -> Any:
         cfg = _get_config()
-        return jsonify({"instances": _config_view(cfg, store).get("instances", [])})
+        view = _config_view(cfg, store)
+        return jsonify({"app": view.get("app", {}), "instances": view.get("instances", [])})
 
     @app.post("/api/settings")
     def save_settings() -> Any:
         payload = request.get_json(silent=True) or {}
         inst_in = payload.get("instances") if isinstance(payload.get("instances"), list) else []
+        app_in = payload.get("app") if isinstance(payload.get("app"), dict) else {}
 
         try:
-            raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8")) or {}
-            if not isinstance(raw, dict):
-                raw = {}
-            # App-level settings are intentionally not editable via UI (instances only),
-            # but we still read them for defaults when persisting per-instance fields.
-            raw_app = raw.get("app") if isinstance(raw.get("app"), dict) else {}
+            store.set_ui_app_settings(quiet_hours_timezone=str(app_in.get("quiet_hours_timezone") or "").strip())
 
-            # Instances: update only fields that are safe to edit via UI.
-            def _update_instances(section_key: str, arr_key: str, app_name: str) -> None:
-                section = raw.get(section_key) if isinstance(raw.get(section_key), dict) else {}
-                instances = section.get("instances") if isinstance(section.get("instances"), list) else []
-                # Map UI payload for this app.
-                ui_map: dict[int, dict[str, Any]] = {}
-                for row in inst_in:
-                    if not isinstance(row, dict):
-                        continue
-                    if str(row.get("app") or "").strip().lower() != app_name:
-                        continue
-                    try:
-                        iid = int(row.get("instance_id") or 0)
-                    except (TypeError, ValueError):
-                        continue
-                    if iid > 0:
-                        ui_map[iid] = row
+            for row in inst_in:
+                if not isinstance(row, dict):
+                    continue
+                app_name = str(row.get("app") or "").strip().lower()
+                try:
+                    iid = int(row.get("instance_id") or 0)
+                except (TypeError, ValueError):
+                    iid = 0
+                if app_name not in ("radarr", "sonarr") or iid <= 0:
+                    continue
 
-                for inst in instances:
-                    if not isinstance(inst, dict):
-                        continue
-                    try:
-                        iid = int(inst.get("instance_id") or 0)
-                    except (TypeError, ValueError):
-                        continue
-                    ui = ui_map.get(iid)
-                    if not ui:
-                        continue
-                    inst["enabled"] = bool(ui.get("enabled", inst.get("enabled", True)))
-                    inst["search_missing"] = bool(ui.get("search_missing", inst.get("search_missing", True)))
-                    inst["search_cutoff_unmet"] = bool(
-                        ui.get("search_cutoff_unmet", inst.get("search_cutoff_unmet", True))
-                    )
-                    if ui.get("search_order") is not None:
-                        inst["search_order"] = (
-                            str(ui.get("search_order") or inst.get("search_order") or "newest").strip().lower()
-                        )
-                    # Per-instance behavior/limits.
-                    if ui.get("quiet_hours_start") is not None:
-                        inst["quiet_hours_start"] = str(ui.get("quiet_hours_start") or "").strip()
-                    if ui.get("quiet_hours_end") is not None:
-                        inst["quiet_hours_end"] = str(ui.get("quiet_hours_end") or "").strip()
-                    if ui.get("min_hours_after_release") is not None:
-                        try:
-                            inst["min_hours_after_release"] = max(0, int(ui.get("min_hours_after_release")))
-                        except (TypeError, ValueError):
-                            pass
-                    if ui.get("min_seconds_between_actions") is not None:
-                        try:
-                            inst["min_seconds_between_actions"] = max(0, int(ui.get("min_seconds_between_actions")))
-                        except (TypeError, ValueError):
-                            pass
-                    if ui.get("max_missing_actions_per_instance_per_sync") is not None:
-                        try:
-                            inst["max_missing_actions_per_instance_per_sync"] = max(
-                                0, int(ui.get("max_missing_actions_per_instance_per_sync"))
-                            )
-                        except (TypeError, ValueError):
-                            pass
-                    if ui.get("max_cutoff_actions_per_instance_per_sync") is not None:
-                        try:
-                            inst["max_cutoff_actions_per_instance_per_sync"] = max(
-                                0, int(ui.get("max_cutoff_actions_per_instance_per_sync"))
-                            )
-                        except (TypeError, ValueError):
-                            pass
-                    # Sonarr-only, but safe to persist in YAML for other apps (ignored by parser).
-                    if ui.get("sonarr_missing_mode") is not None:
-                        inst["sonarr_missing_mode"] = (
-                            str(ui.get("sonarr_missing_mode") or inst.get("sonarr_missing_mode") or "smart")
-                            .strip()
-                            .lower()
-                        )
-                    try:
-                        interval = ui.get("interval_minutes")
-                        inst["interval_minutes"] = max(1, int(interval or inst.get("interval_minutes") or 15))
-                    except (TypeError, ValueError):
-                        pass
-                    try:
-                        inst["item_retry_hours"] = max(
-                            1,
-                            int(
-                                ui.get("item_retry_hours")
-                                or inst.get("item_retry_hours")
-                                or raw_app.get("item_retry_hours")
-                                or 72
-                            ),
-                        )
-                    except (TypeError, ValueError):
-                        pass
-                    # Per-instance rate overrides.
-                    try:
-                        inst["rate_window_minutes"] = max(
-                            1,
-                            int(
-                                ui.get("rate_window_minutes")
-                                or inst.get("rate_window_minutes")
-                                or raw_app.get("rate_window_minutes")
-                                or 60
-                            ),
-                        )
-                    except (TypeError, ValueError):
-                        pass
-                    try:
-                        inst["rate_cap"] = max(
-                            1,
-                            int(
-                                ui.get("rate_cap") or inst.get("rate_cap") or raw_app.get("rate_cap_per_instance") or 25
-                            ),
-                        )
-                    except (TypeError, ValueError):
-                        pass
+                values = {
+                    "enabled": 1 if bool(row.get("enabled", True)) else 0,
+                    "interval_minutes": max(1, int(row.get("interval_minutes") or 15)),
+                    "search_missing": 1 if bool(row.get("search_missing", True)) else 0,
+                    "search_cutoff_unmet": 1 if bool(row.get("search_cutoff_unmet", True)) else 0,
+                    "search_order": str(row.get("search_order") or "smart").strip().lower(),
+                    "quiet_hours_start": str(row.get("quiet_hours_start") or "").strip(),
+                    "quiet_hours_end": str(row.get("quiet_hours_end") or "").strip(),
+                    "min_hours_after_release": max(0, int(row.get("min_hours_after_release") or 0)),
+                    "min_seconds_between_actions": max(0, int(row.get("min_seconds_between_actions") or 0)),
+                    "max_missing_actions_per_instance_per_sync": max(
+                        0, int(row.get("max_missing_actions_per_instance_per_sync") or 0)
+                    ),
+                    "max_cutoff_actions_per_instance_per_sync": max(
+                        0, int(row.get("max_cutoff_actions_per_instance_per_sync") or 0)
+                    ),
+                    "sonarr_missing_mode": str(row.get("sonarr_missing_mode") or "smart").strip().lower(),
+                    "item_retry_hours": max(1, int(row.get("item_retry_hours") or 1)),
+                    "rate_window_minutes": max(1, int(row.get("rate_window_minutes") or 1)),
+                    "rate_cap": max(1, int(row.get("rate_cap") or 1)),
+                    "arr_url": str(row.get("arr_url") or "").strip(),
+                }
+                store.upsert_ui_instance_settings(app_name, iid, values)
 
-                    arr_block = inst.get(arr_key) if isinstance(inst.get(arr_key), dict) else {}
-                    arr_block["enabled"] = bool(inst.get("enabled", True))
-                    url = str(ui.get("arr_url") or "").strip()
-                    if url:
-                        arr_block["url"] = url
-                    api_key = str(ui.get("arr_api_key") or "").strip()
-                    if api_key:
-                        store.set_arr_api_key(app_name, iid, api_key)
-                        arr_block["api_key"] = ""
-                    inst[arr_key] = arr_block
+                api_key = str(row.get("arr_api_key") or "").strip()
+                if api_key:
+                    store.set_arr_api_key(app_name, iid, api_key)
 
-                section["instances"] = instances
-                raw[section_key] = section
-
-            _update_instances("radarr", "radarr", "radarr")
-            _update_instances("sonarr", "sonarr", "sonarr")
-
-            Path(config_path).write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
             _reload_config()
             return jsonify({"ok": True})
         except Exception as exc:

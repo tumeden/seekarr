@@ -3,6 +3,11 @@ app:
   request_timeout_seconds: 30
   verify_ssl: true
   log_level: INFO
+  # Optional timezone for quiet hours:
+  # - IANA name: America/New_York, Europe/London
+  # - Fixed offset: -05:00, +01:00, UTC
+  # Leave empty to use the server/container local timezone.
+  quiet_hours_timezone: ""
 
 radarr:
   instances:

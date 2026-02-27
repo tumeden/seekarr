@@ -42,7 +42,7 @@ Transparency:
 - Skips unreleased content (default: wait 8 hours after air/release).
 - Uses smart calendar-aware prioritization (already-aired/released near-now items are searched first in `search_order: smart`).
 - For recent releases (past 2 days), retries are more aggressive and cycles can wake early when `air/release + min_hours_after_release` is reached.
-- Can pause searching during quiet hours (default: 23:00 to 06:00 local time).
+- Can pause searching during quiet hours (default: 23:00 to 06:00). Set `app.quiet_hours_timezone` to pin the timezone (IANA name like `America/New_York`, or fixed offset like `-05:00`).
 
 Sonarr missing mode defaults to `smart`:
 - Empty/mostly-empty seasons prefer season-pack searches.
@@ -64,17 +64,12 @@ cp config.example.yaml config.yaml
 - If Seekarr runs on a different machine than Radarr/Sonarr, do not use `localhost`.
 - Use an IP/hostname Seekarr can reach (example: `http://192.168.1.50:7878`).
 
-3. Provide API keys (pick one):
+3. Open Web UI and configure everything from **Settings**:
 
-- Recommended: set them in the Web UI (Settings). They are stored encrypted in SQLite.
-- Alternative: keep them in `config.yaml` (supports `${ENV_VAR}` interpolation) and provide env vars (or a `.env` file).
-
-Env var examples (if you set `api_key: "${RADARR_API_KEY_1}"` / `api_key: "${SONARR_API_KEY_1}"` in `config.yaml`):
-
-```env
-RADARR_API_KEY_1=your-radarr-key
-SONARR_API_KEY_1=your-sonarr-key
-```
+- Arr URL
+- Arr API key (stored encrypted in SQLite)
+- Quiet hours start/end/timezone
+- Search behavior/rate/interval settings
 
 ---
 
@@ -96,11 +91,8 @@ services:
     image: tumeden/seekarr:latest
     container_name: seekarr
     restart: unless-stopped
-    command: ["python", "webui_main.py", "--config", "/data/config.yaml", "--host", "0.0.0.0", "--port", "8788", "--allow-public"]
     ports:
-      - "127.0.0.1:8788:8788"
-    environment:
-      WEBUI_AUTORUN_DEFAULT: "1"
+      - "8788:8788"
     volumes:
       - ./data:/data
 ```
@@ -108,6 +100,8 @@ services:
 Notes:
 - Persist `./data` (it contains `config.yaml`, `seekarr.db`, and `seekarr.masterkey`).
 - Seekarr auto-creates `./data/config.yaml` on first start if it is missing.
+- Web UI settings are persisted in `seekarr.db` (SQLite), not written back to `config.yaml`.
+- Quiet hours use your configured `app.quiet_hours_timezone` (if set), otherwise the container timezone.
 - First load prompts you to set a Web UI password (stored as a salted hash in SQLite).
 - Put keys/password in `./data/.env` only if you want to pre-seed them (optional):
 
@@ -141,29 +135,6 @@ If you forget your Web UI password, reset it by deleting the stored password has
 
 ---
 
-## Linux (systemd via install.sh)
-
-Console mode (no UI):
-
-```bash
-sudo ./install.sh --mode console --user youruser
-```
-
-Web UI mode (also runs the automation):
-
-```bash
-sudo ./install.sh --mode webui --user youruser --webui-host 127.0.0.1 --webui-port 8788
-```
-
-Logs:
-
-```bash
-journalctl -u seekarr-console -f
-journalctl -u seekarr-webui -f
-```
-
----
-
 ## Windows (Quick Run)
 
 1. Install Python 3.11+
@@ -175,14 +146,7 @@ python -m pip install -r requirements.txt
 
 3. Run (pick one):
 - `run-webui.bat`
-- `run-console.bat`
-
-Optional (console credential set):
-
-```bat
-python main.py --config config.yaml --set-api-key radarr 1
-python main.py --config config.yaml --set-api-key sonarr 1
-```
+- `run-console.bat` (dev alias; starts Web UI)
 
 ---
 

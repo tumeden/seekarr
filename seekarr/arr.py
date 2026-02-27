@@ -228,6 +228,31 @@ class ArrClient:
             return []
         return [row for row in payload if isinstance(row, dict)]
 
+    def fetch_queue_episode_ids(self) -> set[int]:
+        """
+        Sonarr helper.
+        Returns episode ids currently present in the download queue.
+        """
+        if self.name != "sonarr":
+            return set()
+        ids: set[int] = set()
+        try:
+            rows = self._fetch_paged_records("/api/v3/queue")
+        except ArrRequestError:
+            return ids
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            episode_id = int(row.get("episodeId") or 0)
+            if episode_id > 0:
+                ids.add(episode_id)
+                continue
+            episode = row.get("episode") if isinstance(row.get("episode"), dict) else {}
+            episode_id = int(episode.get("id") or 0)
+            if episode_id > 0:
+                ids.add(episode_id)
+        return ids
+
     def _fetch_series_lookup(self) -> dict[int, tuple[str, int, bool]]:
         """Return {series_id: (title, tvdb_id, monitored)} for Sonarr mapping."""
         lookup: dict[int, tuple[str, int, bool]] = {}
@@ -433,8 +458,9 @@ class ArrClient:
         Returns:
             {
               season_number: {
-                "aired_total": int,      # aired episodes known to Sonarr
-                "aired_downloaded": int, # aired episodes with hasFile=true
+                "aired_total": int,       # aired episodes known to Sonarr
+                "aired_downloaded": int,  # aired episodes with hasFile=true
+                "unaired_total": int,     # known episodes that have not aired yet
               }
             }
         """
@@ -467,10 +493,10 @@ class ArrClient:
                     aired = dt.astimezone(timezone.utc) <= now_utc
                 except ValueError:
                     aired = True
+            slot = out.setdefault(season_number, {"aired_total": 0, "aired_downloaded": 0, "unaired_total": 0})
             if not aired:
+                slot["unaired_total"] += 1
                 continue
-
-            slot = out.setdefault(season_number, {"aired_total": 0, "aired_downloaded": 0})
             slot["aired_total"] += 1
             if bool(row.get("hasFile")):
                 slot["aired_downloaded"] += 1

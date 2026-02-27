@@ -20,7 +20,7 @@ from flask import Flask, jsonify, request, send_file
 
 from .arr import ArrRequestError
 from .config import RuntimeConfig, load_config
-from .engine import Engine
+from .engine import Engine, _quiet_hours_end_utc
 from .logging_utils import setup_logging
 from .state import StateStore
 
@@ -533,6 +533,23 @@ def create_app(config_path: str) -> Flask:
                 inst = engine._find_instance(app_type, instance_id)
                 if not inst or not inst.enabled or not inst.arr.enabled:
                     time.sleep(5.0)
+                    continue
+
+                # Quiet-hours pre-check: schedule directly to quiet end so the dashboard and
+                # autorun loop both enter sleep mode immediately without an unnecessary due run.
+                quiet_start = str(getattr(inst, "quiet_hours_start", None) or config.app.quiet_hours_start or "")
+                quiet_end = str(getattr(inst, "quiet_hours_end", None) or config.app.quiet_hours_end or "")
+                quiet_tz = str(getattr(config.app, "quiet_hours_timezone", "") or "")
+                quiet_end_utc = _quiet_hours_end_utc(
+                    datetime.now(timezone.utc),
+                    quiet_start,
+                    quiet_end,
+                    quiet_timezone=quiet_tz,
+                )
+                if quiet_end_utc:
+                    quiet_iso = quiet_end_utc.isoformat()
+                    store.set_next_sync_time(app_type, instance_id, quiet_iso)
+                    _sleep_until(quiet_iso)
                     continue
 
                 next_sync = store.get_next_sync_time(app_type, instance_id)
@@ -1103,7 +1120,7 @@ def create_app(config_path: str) -> Flask:
           <h3>Instances</h3>
           <div class="table-wrap">
             <table id="instances">
-              <thead><tr><th>App</th><th>Name</th><th>Enabled</th><th>Wanted</th><th>Interval</th><th>Retry</th><th>Rate</th><th>Last Sync (UTC)</th><th>Next Sync (UTC)</th><th>Countdown</th><th>URL</th></tr></thead>
+              <thead><tr><th>App</th><th>Name</th><th>Enabled</th><th>Wanted</th><th>Interval</th><th>Retry</th><th>Rate</th><th>Last Sync</th><th>Next Sync</th><th>Countdown</th><th>URL</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -1152,6 +1169,7 @@ def create_app(config_path: str) -> Flask:
     let authMode = '';
     let timersStarted = false;
     let timezoneOptionsLoaded = false;
+    let activeTimeZone = '';
     let refreshTimer = null;
     let countdownTimer = null;
     const authStorageKey = 'seekarr_auth_header';
@@ -1332,11 +1350,32 @@ def create_app(config_path: str) -> Flask:
         : `<span class="badge off"${t}>${label}</span>`;
     }
     function safe(v) { return (v === null || v === undefined) ? '' : String(v); }
-    function fmtUtc(iso) {
+    function getTimeZoneLabel() {
+      return activeTimeZone ? activeTimeZone : 'local';
+    }
+    function fmtTime(iso) {
       if (!iso) return '';
       const t = Date.parse(iso);
       if (!Number.isFinite(t)) return safe(iso);
-      return new Date(t).toISOString().replace('T', ' ').slice(0, 19);
+      const dt = new Date(t);
+      const opts = {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      };
+      if (activeTimeZone) opts.timeZone = activeTimeZone;
+      try {
+        const parts = new Intl.DateTimeFormat('en-CA', opts).formatToParts(dt);
+        const byType = {};
+        for (const p of parts) byType[p.type] = p.value;
+        return `${byType.year}-${byType.month}-${byType.day} ${byType.hour}:${byType.minute}:${byType.second}`;
+      } catch (e) {
+        return dt.toLocaleString();
+      }
     }
     function setSection(name) {
       document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
@@ -1442,6 +1481,7 @@ def create_app(config_path: str) -> Flask:
         return;
       }
       const data = await r.json();
+      activeTimeZone = String(data?.config?.app?.quiet_hours_timezone || '').trim();
       const ver = data.version || {};
       const versionChip = document.getElementById('version-chip');
       if (versionChip) {
@@ -1489,8 +1529,8 @@ def create_app(config_path: str) -> Flask:
           <td>${safe(i.interval_minutes)}m</td>
           <td>${safe(i.item_retry_hours)}h</td>
           <td>${safe(i.rate_cap)}/${safe(i.rate_window_minutes)}m</td>
-          <td class="mono" title="${safe(s.last_sync_time) || ''}">${fmtUtc(s.last_sync_time) || '-'}</td>
-          <td class="mono" title="${safe(s.next_sync_time) || ''}">${fmtUtc(s.next_sync_time) || '-'}</td>
+          <td class="mono" title="${safe(s.last_sync_time) || ''}">${fmtTime(s.last_sync_time) || '-'}</td>
+          <td class="mono" title="${safe(s.next_sync_time) || ''}">${fmtTime(s.next_sync_time) || '-'}</td>
           <td class="mono" data-next-sync="${safe(s.next_sync_time)}">${fmtCountdown(s.next_sync_time)}</td>
           <td class="mono">${safe(i.arr_url)}</td>
         </tr>`;
@@ -1546,7 +1586,7 @@ def create_app(config_path: str) -> Flask:
               </div>
             </div>
             <div class="big-countdown ${due ? 'due' : ''}" data-next-sync="${safe(s.next_sync_time)}">${cd}</div>
-            <div class="subline mono" title="${safe(s.next_sync_time) || ''}">Next run: UTC ${fmtUtc(s.next_sync_time) || '-'}</div>
+            <div class="subline mono" title="${safe(s.next_sync_time) || ''}">Next run (${safe(getTimeZoneLabel())}): ${fmtTime(s.next_sync_time) || '-'}</div>
             <div class="subline ${due ? 'warn' : ''}">${note}</div>
             <div style="margin-top:10px;">
               <div class="subline" style="display:flex; justify-content:space-between; gap:10px;">
@@ -1562,7 +1602,7 @@ def create_app(config_path: str) -> Flask:
               <div><div class="k">Triggered (Last)</div><div class="v">${safe(lrs.actions_triggered ?? '-')}</div></div>
               <div><div class="k">Interval</div><div class="v">${safe(i.interval_minutes)}m</div></div>
               <div><div class="k">Retry</div><div class="v">${safe(i.item_retry_hours)}h</div></div>
-              <div><div class="k">Last Sync</div><div class="v mono">${fmtUtc(s.last_sync_time) || '-'}</div></div>
+              <div><div class="k">Last Sync</div><div class="v mono">${fmtTime(s.last_sync_time) || '-'}</div></div>
               <div><div class="k">Window</div><div class="v">${safe(i.rate_window_minutes)}m</div></div>
             </div>
           </div>
@@ -1580,7 +1620,7 @@ def create_app(config_path: str) -> Flask:
         let body = '';
         for (const row of rows) {
           body += `<tr>
-            <td class="mono time" title="${safe(row.occurred_at) || ''}">${fmtUtc(row.occurred_at) || '-'}</td>
+            <td class="mono time" title="${safe(row.occurred_at) || ''}">${fmtTime(row.occurred_at) || '-'}</td>
             <td class="title">${safe(row.title)}</td>
           </tr>`;
         }
@@ -1598,7 +1638,7 @@ def create_app(config_path: str) -> Flask:
                 </colgroup>
                 <thead>
                   <tr>
-                    <th>Time (UTC)</th><th>Title Searched</th>
+                    <th>Time (${safe(getTimeZoneLabel())})</th><th>Title Searched</th>
                   </tr>
                 </thead>
                 <tbody>${body}</tbody>
@@ -1619,9 +1659,8 @@ def create_app(config_path: str) -> Flask:
       if (!actions.length) {
         actionsEl.textContent = '-';
       } else {
-        // Render newest-first.
-        const lines = actions.slice().reverse().map(a => {
-          const ts = fmtUtc(a.ts) || '--';
+        const lines = actions.map(a => {
+          const ts = fmtTime(a.ts) || '--';
           const app = (a.app_type || '').toUpperCase();
           const inst = a.instance_name ? ` (${a.instance_name})` : '';
           const title = a.title || '';

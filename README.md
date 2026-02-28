@@ -5,9 +5,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/tumeden/seekarr/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/tumeden/seekarr/ci.yml?branch=main&style=flat&logo=github&label=CI"></a>
+  <a href="https://github.com/tumeden/seekarr/actions/workflows/quality.yml"><img alt="Quality" src="https://img.shields.io/github/actions/workflow/status/tumeden/seekarr/quality.yml?branch=main&style=flat&logo=github&label=Quality"></a>
+  <a href="https://github.com/tumeden/seekarr/actions/workflows/security.yml"><img alt="Security" src="https://img.shields.io/github/actions/workflow/status/tumeden/seekarr/security.yml?branch=main&style=flat&logo=github&label=Security"></a>
+  <a href="https://github.com/tumeden/seekarr/actions/workflows/docker.yml"><img alt="Docker" src="https://img.shields.io/github/actions/workflow/status/tumeden/seekarr/docker.yml?branch=main&style=flat&logo=github&label=Docker"></a>
+  <a href="https://github.com/tumeden/seekarr/actions/workflows/workflow-lint.yml"><img alt="Workflow Lint" src="https://img.shields.io/github/actions/workflow/status/tumeden/seekarr/workflow-lint.yml?branch=main&style=flat&logo=github&label=Workflow%20Lint"></a>
+  <a href="https://github.com/tumeden/seekarr/actions/workflows/dockerfile-lint.yml"><img alt="Dockerfile Lint" src="https://img.shields.io/github/actions/workflow/status/tumeden/seekarr/dockerfile-lint.yml?branch=main&style=flat&logo=github&label=Dockerfile%20Lint"></a>
   <a href="https://github.com/tumeden/seekarr/releases"><img alt="Latest Release" src="https://img.shields.io/github/v/release/tumeden/seekarr?style=flat&logo=github&logoColor=white&label=Latest%20Release"></a>
-  <img alt="Commits Since Release" src="https://img.shields.io/github/commits-since/tumeden/seekarr/latest?style=flat&logo=github&logoColor=white&label=Commits">
+  <img alt="Commits Since Last Release" src="https://img.shields.io/github/commits-since/tumeden/seekarr/latest?style=flat&logo=github&logoColor=white&label=Commits%20Since%20Last%20Release">
   <img alt="Commits Per Month" src="https://img.shields.io/github/commit-activity/m/tumeden/seekarr?style=flat&logo=github&logoColor=white&label=Commits%2FMonth">
   <img alt="Stars" src="https://img.shields.io/github/stars/tumeden/seekarr?style=flat&logo=github&logoColor=white&label=Stars">
   <a href="https://hub.docker.com/r/tumeden/seekarr"><img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/tumeden/seekarr?style=flat&logo=docker&logoColor=white&label=Docker%20Pulls"></a>

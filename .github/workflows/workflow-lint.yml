@@ -1,0 +1,23 @@
+name: Workflow Lint
+
+on:
+  push:
+    branches: ["main", "dev"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Lint GitHub workflows
+        uses: reviewdog/action-actionlint@v1

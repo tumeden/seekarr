@@ -1,9 +1,11 @@
-name: CI
+name: Security
 
 on:
   push:
     branches: ["main", "dev"]
   pull_request:
+  schedule:
+    - cron: "0 9 * * 1"
 
 permissions:
   contents: read
@@ -13,12 +15,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  python:
+  dependency-audit:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12"]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -26,22 +24,15 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.11"
           cache: pip
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
+          pip install -r requirements.txt -r requirements-dev.txt
+          pip install pip-audit
 
-      - name: Lint + format
+      - name: Dependency vulnerability audit
         run: |
-          python -m ruff check .
-          python -m ruff format --check .
-
-      - name: Tests + sanity
-        run: |
-          python -m pytest -q
-          python -m compileall -q .
-          python webui_main.py --help >/dev/null
+          python -m pip_audit -r requirements.txt -r requirements-dev.txt

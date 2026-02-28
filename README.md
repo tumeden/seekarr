@@ -91,4 +91,7 @@ Web UI setting changes are stored in `seekarr.db`.
 
 ---
 
-Looking to clean up stuck/failed downloads? Check out https://github.com/ManiMatter/decluttarr
+## Related Projects
+
+- Need help cleaning up stuck or failed downloads? [Decluttarr](https://github.com/ManiMatter/decluttarr)
+- Looking for library maintenance automation for Plex/Jellyfin? [Maintainerr](https://github.com/Maintainerr/Maintainerr)

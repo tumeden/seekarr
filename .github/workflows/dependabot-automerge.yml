@@ -3,32 +3,131 @@ name: Dependabot auto-merge
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
+  workflow_run:
+    workflows: ["Quality", "Security", "Docker", "Dockerfile Lint", "Workflow Lint"]
+    types: [completed]
 
 permissions:
+  actions: read
   contents: write
   pull-requests: write
 
 jobs:
   automerge:
-    if: github.actor == 'dependabot[bot]'
+    if: github.event_name == 'pull_request_target' || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request')
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch Dependabot metadata
-        id: meta
-        uses: dependabot/fetch-metadata@v2
+      - name: Validate Dependabot PR + CI success
+        id: guard
+        uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const requiredWorkflows = [
+              'Quality',
+              'Security',
+              'Docker',
+              'Dockerfile Lint',
+              'Workflow Lint',
+            ];
+
+            let prNumber;
+            let headSha;
+            if (context.eventName === 'pull_request_target') {
+              prNumber = context.payload.pull_request?.number;
+              headSha = context.payload.pull_request?.head?.sha;
+            } else {
+              prNumber = context.payload.workflow_run?.pull_requests?.[0]?.number;
+              headSha = context.payload.workflow_run?.head_sha;
+            }
+
+            if (!prNumber || !headSha) {
+              core.info('No PR context found; skipping.');
+              core.setOutput('ok', 'false');
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: prNumber,
+            });
+
+            if (pr.state !== 'open') {
+              core.info(`PR #${prNumber} is not open; skipping.`);
+              core.setOutput('ok', 'false');
+              return;
+            }
+
+            if (pr.user?.login !== 'dependabot[bot]') {
+              core.info(`PR #${prNumber} is not from dependabot[bot]; skipping.`);
+              core.setOutput('ok', 'false');
+              return;
+            }
+
+            const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+              ...context.repo,
+              event: 'pull_request',
+              head_sha: headSha,
+              per_page: 100,
+            });
+
+            const latestByName = new Map();
+            for (const run of runs) {
+              const current = latestByName.get(run.name);
+              if (!current || new Date(run.created_at) > new Date(current.created_at)) {
+                latestByName.set(run.name, run);
+              }
+            }
+
+            const missing = [];
+            const notSuccessful = [];
+            for (const workflowName of requiredWorkflows) {
+              const run = latestByName.get(workflowName);
+              if (!run) {
+                missing.push(workflowName);
+                continue;
+              }
+              if (run.status !== 'completed' || run.conclusion !== 'success') {
+                notSuccessful.push(`${workflowName} (${run.status}/${run.conclusion})`);
+              }
+            }
+
+            if (missing.length || notSuccessful.length) {
+              core.info(`Missing required workflow runs: ${missing.join(', ') || 'none'}`);
+              core.info(`Required workflow runs not successful yet: ${notSuccessful.join(', ') || 'none'}`);
+              core.setOutput('ok', 'false');
+              return;
+            }
+
+            const { data: commit } = await github.rest.repos.getCommit({
+              ...context.repo,
+              ref: headSha,
+            });
+            const message = commit.commit.message || '';
+            const updateTypeMatch = message.match(/update-type:\s*([^\s]+)/);
+            const updateType = updateTypeMatch ? updateTypeMatch[1] : '';
+
+            if (!updateType) {
+              core.info('Could not determine Dependabot update-type from commit message; skipping.');
+              core.setOutput('ok', 'false');
+              return;
+            }
+
+            core.info(`PR #${prNumber} eligible. update-type=${updateType}`);
+            core.setOutput('ok', 'true');
+            core.setOutput('pr_number', String(prNumber));
+            core.setOutput('update_type', updateType);
 
       - name: Auto-approve (patch/minor only)
-        if: contains('version-update:semver-patch version-update:semver-minor', steps.meta.outputs.update-type)
+        if: steps.guard.outputs.ok == 'true' && contains('version-update:semver-patch version-update:semver-minor', steps.guard.outputs.update_type)
         uses: hmarr/auto-approve-action@v4
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enable auto-merge (squash)
-        if: contains('version-update:semver-patch version-update:semver-minor', steps.meta.outputs.update-type)
+        if: steps.guard.outputs.ok == 'true' && contains('version-update:semver-patch version-update:semver-minor', steps.guard.outputs.update_type)
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          pull-request-number: ${{ github.event.pull_request.number }}
+          pull-request-number: ${{ steps.guard.outputs.pr_number }}
           merge-method: squash

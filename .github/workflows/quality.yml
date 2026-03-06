@@ -3,7 +3,11 @@ name: Quality
 on:
   push:
     branches: ["main", "dev"]
+    paths-ignore:
+      - ".github/**"
   pull_request:
+    paths-ignore:
+      - ".github/**"
 
 permissions:
   contents: read

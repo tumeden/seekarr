@@ -3,7 +3,11 @@ name: Workflow Lint
 on:
   push:
     branches: ["main", "dev"]
+    paths:
+      - ".github/workflows/**"
   pull_request:
+    paths:
+      - ".github/workflows/**"
 
 permissions:
   contents: read

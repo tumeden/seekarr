@@ -23,14 +23,6 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const requiredWorkflows = [
-              'Quality',
-              'Security',
-              'Docker',
-              'Dockerfile Lint',
-              'Workflow Lint',
-            ];
-
             let prNumber;
             let headSha;
             if (context.eventName === 'pull_request_target') {
@@ -60,6 +52,30 @@ jobs:
 
             if (pr.user?.login !== 'dependabot[bot]') {
               core.info(`PR #${prNumber} is not from dependabot[bot]; skipping.`);
+              core.setOutput('ok', 'false');
+              return;
+            }
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              ...context.repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            const filenames = files.map((f) => f.filename);
+            const hasNonGithubChanges = filenames.some((f) => !f.startsWith('.github/'));
+            const hasWorkflowChanges = filenames.some((f) => f.startsWith('.github/workflows/'));
+
+            const requiredWorkflows = [];
+            if (hasNonGithubChanges) {
+              requiredWorkflows.push('Quality', 'Security', 'Docker', 'Dockerfile Lint');
+            }
+            if (hasWorkflowChanges) {
+              requiredWorkflows.push('Workflow Lint');
+            }
+
+            if (requiredWorkflows.length === 0) {
+              core.info('No required CI workflows matched changed files; skipping.');
               core.setOutput('ok', 'false');
               return;
             }
@@ -123,6 +139,7 @@ jobs:
         uses: hmarr/auto-approve-action@v4
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.guard.outputs.pr_number }}
 
       - name: Enable auto-merge (squash)
         if: steps.guard.outputs.ok == 'true' && contains('version-update:semver-patch version-update:semver-minor', steps.guard.outputs.update_type)

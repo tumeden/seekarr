@@ -1,8 +1,6 @@
 name: Dependabot auto-merge
 
 on:
-  pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review]
   workflow_run:
     workflows: ["Quality", "Security", "Docker", "Dockerfile Lint", "Workflow Lint"]
     types: [completed]
@@ -14,7 +12,7 @@ permissions:
 
 jobs:
   automerge:
-    if: github.event_name == 'pull_request_target' || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request')
+    if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Validate Dependabot PR + CI success
@@ -25,13 +23,8 @@ jobs:
           script: |
             let prNumber;
             let headSha;
-            if (context.eventName === 'pull_request_target') {
-              prNumber = context.payload.pull_request?.number;
-              headSha = context.payload.pull_request?.head?.sha;
-            } else {
-              prNumber = context.payload.workflow_run?.pull_requests?.[0]?.number;
-              headSha = context.payload.workflow_run?.head_sha;
-            }
+            prNumber = context.payload.workflow_run?.pull_requests?.[0]?.number;
+            headSha = context.payload.workflow_run?.head_sha;
 
             if (!prNumber || !headSha) {
               core.info('No PR context found; skipping.');
@@ -65,6 +58,7 @@ jobs:
             const filenames = files.map((f) => f.filename);
             const hasNonGithubChanges = filenames.some((f) => !f.startsWith('.github/'));
             const hasWorkflowChanges = filenames.some((f) => f.startsWith('.github/workflows/'));
+            core.setOutput('has_workflow_changes', String(hasWorkflowChanges));
 
             const requiredWorkflows = [];
             if (hasNonGithubChanges) {
@@ -141,10 +135,16 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           pull-request-number: ${{ steps.guard.outputs.pr_number }}
 
+      - name: Workflow update needs elevated token
+        if: steps.guard.outputs.ok == 'true' && contains('version-update:semver-patch version-update:semver-minor', steps.guard.outputs.update_type) && steps.guard.outputs.has_workflow_changes == 'true' && secrets.SEEKARR_AUTOMERGE == ''
+        run: |
+          echo "Dependabot PR touches .github/workflows. GitHub blocks mergePullRequest for app tokens without workflows permission."
+          echo "Set SEEKARR_AUTOMERGE (classic PAT with repo+workflow scopes or fine-grained token with Workflows write + Pull requests write) to auto-merge these PRs."
+
       - name: Enable auto-merge (squash)
-        if: steps.guard.outputs.ok == 'true' && contains('version-update:semver-patch version-update:semver-minor', steps.guard.outputs.update_type)
+        if: steps.guard.outputs.ok == 'true' && contains('version-update:semver-patch version-update:semver-minor', steps.guard.outputs.update_type) && (steps.guard.outputs.has_workflow_changes != 'true' || secrets.SEEKARR_AUTOMERGE != '')
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.SEEKARR_AUTOMERGE != '' && secrets.SEEKARR_AUTOMERGE || secrets.GITHUB_TOKEN }}
           pull-request-number: ${{ steps.guard.outputs.pr_number }}
           merge-method: squash

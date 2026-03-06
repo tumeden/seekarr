@@ -14,6 +14,8 @@ jobs:
   automerge:
     if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      SEEKARR_AUTOMERGE_TOKEN: ${{ secrets.SEEKARR_AUTOMERGE }}
     steps:
       - name: Validate Dependabot PR + CI success
         id: guard
@@ -136,15 +138,23 @@ jobs:
           pull-request-number: ${{ steps.guard.outputs.pr_number }}
 
       - name: Workflow update needs elevated token
-        if: steps.guard.outputs.ok == 'true' && contains('version-update:semver-patch version-update:semver-minor', steps.guard.outputs.update_type) && steps.guard.outputs.has_workflow_changes == 'true' && secrets.SEEKARR_AUTOMERGE == ''
+        if: steps.guard.outputs.ok == 'true' && contains('version-update:semver-patch version-update:semver-minor', steps.guard.outputs.update_type) && steps.guard.outputs.has_workflow_changes == 'true' && env.SEEKARR_AUTOMERGE_TOKEN == ''
         run: |
           echo "Dependabot PR touches .github/workflows. GitHub blocks mergePullRequest for app tokens without workflows permission."
           echo "Set SEEKARR_AUTOMERGE (classic PAT with repo+workflow scopes or fine-grained token with Workflows write + Pull requests write) to auto-merge these PRs."
 
-      - name: Enable auto-merge (squash)
-        if: steps.guard.outputs.ok == 'true' && contains('version-update:semver-patch version-update:semver-minor', steps.guard.outputs.update_type) && (steps.guard.outputs.has_workflow_changes != 'true' || secrets.SEEKARR_AUTOMERGE != '')
+      - name: Enable auto-merge (squash, workflow updates)
+        if: steps.guard.outputs.ok == 'true' && contains('version-update:semver-patch version-update:semver-minor', steps.guard.outputs.update_type) && steps.guard.outputs.has_workflow_changes == 'true' && env.SEEKARR_AUTOMERGE_TOKEN != ''
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
-          token: ${{ secrets.SEEKARR_AUTOMERGE != '' && secrets.SEEKARR_AUTOMERGE || secrets.GITHUB_TOKEN }}
+          token: ${{ env.SEEKARR_AUTOMERGE_TOKEN }}
+          pull-request-number: ${{ steps.guard.outputs.pr_number }}
+          merge-method: squash
+
+      - name: Enable auto-merge (squash)
+        if: steps.guard.outputs.ok == 'true' && contains('version-update:semver-patch version-update:semver-minor', steps.guard.outputs.update_type) && steps.guard.outputs.has_workflow_changes != 'true'
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           pull-request-number: ${{ steps.guard.outputs.pr_number }}
           merge-method: squash

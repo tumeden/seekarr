@@ -402,21 +402,29 @@ class Engine:
             wanted = (
                 client.fetch_wanted_movies(
                     search_missing=bool(getattr(instance, "search_missing", True)),
-                    search_cutoff_unmet=bool(getattr(instance, "search_cutoff_unmet", True)),
+                    search_cutoff_unmet=(
+                        bool(getattr(instance, "search_cutoff_unmet", True))
+                        and str(getattr(instance, "upgrade_scope", "wanted") or "wanted").strip().lower()
+                        in ("wanted", "both")
+                    ),
                     search_all_monitored=(
                         bool(getattr(instance, "search_cutoff_unmet", True))
                         and str(getattr(instance, "upgrade_scope", "wanted") or "wanted").strip().lower()
-                        == "all_monitored"
+                        in ("monitored", "both")
                     ),
                 )
                 if app_type == "radarr"
                 else client.fetch_wanted_episodes(
                     search_missing=bool(getattr(instance, "search_missing", True)),
-                    search_cutoff_unmet=bool(getattr(instance, "search_cutoff_unmet", True)),
+                    search_cutoff_unmet=(
+                        bool(getattr(instance, "search_cutoff_unmet", True))
+                        and str(getattr(instance, "upgrade_scope", "wanted") or "wanted").strip().lower()
+                        in ("wanted", "both")
+                    ),
                     search_all_monitored=(
                         bool(getattr(instance, "search_cutoff_unmet", True))
                         and str(getattr(instance, "upgrade_scope", "wanted") or "wanted").strip().lower()
-                        == "all_monitored"
+                        in ("monitored", "both")
                     ),
                 )
             )

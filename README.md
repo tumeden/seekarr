@@ -38,6 +38,12 @@ Seekarr automatically triggers Radarr/Sonarr searches for monitored items in you
 - Skips unreleased content until the configured delay passes.
 - Supports quiet hours (with configurable timezone in Web UI).
 
+Upgrade source modes:
+
+- `Wanted List Only`: only Arr's current upgrade candidates.
+- `Monitored Items Only`: monitored items with files, even if Arr no longer lists them as upgrades.
+- `Both`: combines Arr's upgrade candidates with monitored items that already have files.
+
 ---
 
 ## Docker Quick Start

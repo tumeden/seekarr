@@ -25,7 +25,7 @@ def test_ui_instance_settings_roundtrip_upgrade_scope(tmp_path) -> None:
             "interval_minutes": 15,
             "search_missing": 1,
             "search_cutoff_unmet": 1,
-            "upgrade_scope": "all_monitored",
+            "upgrade_scope": "both",
             "search_order": "smart",
             "quiet_hours_start": "23:00",
             "quiet_hours_end": "06:00",
@@ -42,7 +42,7 @@ def test_ui_instance_settings_roundtrip_upgrade_scope(tmp_path) -> None:
     )
 
     values = store.get_all_ui_instance_settings()[("radarr", 1)]
-    assert values["upgrade_scope"] == "all_monitored"
+    assert values["upgrade_scope"] == "both"
 
 
 def test_ui_instance_settings_migrates_upgrade_scope_column(tmp_path) -> None:

@@ -47,20 +47,20 @@ def _radarr_instance(upgrade_scope: str) -> ArrSyncInstanceConfig:
     )
 
 
-def test_engine_passes_all_monitored_upgrade_scope(monkeypatch, tmp_path) -> None:
-    seen: list[bool] = []
+def test_engine_passes_monitored_upgrade_scope(monkeypatch, tmp_path) -> None:
+    seen: list[tuple[bool, bool]] = []
 
     class FakeArrClient:
         def __init__(self, name, config, timeout_seconds, verify_ssl, logger):  # noqa: ANN001
             self.name = name
 
         def fetch_wanted_movies(self, search_missing=True, search_cutoff_unmet=True, search_all_monitored=False):  # noqa: ANN001
-            seen.append(bool(search_all_monitored))
+            seen.append((bool(search_cutoff_unmet), bool(search_all_monitored)))
             return []
 
     cfg = RuntimeConfig(
         app=_base_app_config(str(tmp_path / "seekarr.db")),
-        radarr_instances=[_radarr_instance("all_monitored")],
+        radarr_instances=[_radarr_instance("monitored")],
         sonarr_instances=[],
     )
     monkeypatch.setattr("seekarr.engine.ArrClient", FakeArrClient)
@@ -68,18 +68,18 @@ def test_engine_passes_all_monitored_upgrade_scope(monkeypatch, tmp_path) -> Non
     engine = Engine(config=cfg, logger=logging.getLogger("test"))
     engine.run_instance("radarr", 1, force=True)
 
-    assert seen == [True]
+    assert seen == [(False, True)]
 
 
 def test_engine_keeps_wanted_upgrade_scope_default(monkeypatch, tmp_path) -> None:
-    seen: list[bool] = []
+    seen: list[tuple[bool, bool]] = []
 
     class FakeArrClient:
         def __init__(self, name, config, timeout_seconds, verify_ssl, logger):  # noqa: ANN001
             self.name = name
 
         def fetch_wanted_movies(self, search_missing=True, search_cutoff_unmet=True, search_all_monitored=False):  # noqa: ANN001
-            seen.append(bool(search_all_monitored))
+            seen.append((bool(search_cutoff_unmet), bool(search_all_monitored)))
             return []
 
     cfg = RuntimeConfig(
@@ -92,4 +92,28 @@ def test_engine_keeps_wanted_upgrade_scope_default(monkeypatch, tmp_path) -> Non
     engine = Engine(config=cfg, logger=logging.getLogger("test"))
     engine.run_instance("radarr", 1, force=True)
 
-    assert seen == [False]
+    assert seen == [(True, False)]
+
+
+def test_engine_passes_both_upgrade_scope(monkeypatch, tmp_path) -> None:
+    seen: list[tuple[bool, bool]] = []
+
+    class FakeArrClient:
+        def __init__(self, name, config, timeout_seconds, verify_ssl, logger):  # noqa: ANN001
+            self.name = name
+
+        def fetch_wanted_movies(self, search_missing=True, search_cutoff_unmet=True, search_all_monitored=False):  # noqa: ANN001
+            seen.append((bool(search_cutoff_unmet), bool(search_all_monitored)))
+            return []
+
+    cfg = RuntimeConfig(
+        app=_base_app_config(str(tmp_path / "seekarr.db")),
+        radarr_instances=[_radarr_instance("both")],
+        sonarr_instances=[],
+    )
+    monkeypatch.setattr("seekarr.engine.ArrClient", FakeArrClient)
+
+    engine = Engine(config=cfg, logger=logging.getLogger("test"))
+    engine.run_instance("radarr", 1, force=True)
+
+    assert seen == [(True, True)]

@@ -44,7 +44,8 @@ class ArrSyncInstanceConfig:
     search_cutoff_unmet: bool
     # Upgrade source:
     # - "wanted": only items Arr still reports as upgrade candidates (default)
-    # - "all_monitored": any monitored item with a file can be re-searched for a better release
+    # - "monitored": monitored items with files, regardless of Arr's wanted list
+    # - "both": Arr wanted upgrades plus monitored items with files
     upgrade_scope: str
     # Selection order when choosing what to search this cycle.
     # - newest: newest air/release date first (default)
@@ -101,8 +102,10 @@ def _require_str(data: dict[str, Any], key: str, default: str = "") -> str:
 
 def _normalize_upgrade_scope(value: Any) -> str:
     scope = str(value or "").strip().lower()
-    if scope in ("all", "all_monitored", "library", "monitored", "full_library"):
-        return "all_monitored"
+    if scope in ("both", "all", "all_monitored", "full_library"):
+        return "both"
+    if scope in ("monitored", "library", "monitored_only"):
+        return "monitored"
     if scope in ("wanted", "wanted_only", "cutoff", "cutoff_only"):
         return "wanted"
     return "wanted"

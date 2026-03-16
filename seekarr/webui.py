@@ -1520,10 +1520,11 @@ def create_app(config_path: str) -> Flask:
       for (const i of data.config.instances) {
         const key = `${i.app}:${i.instance_id}`;
         const s = syncMap[key] || {};
-        const upgradeScope = String(i.upgrade_scope || 'wanted').toLowerCase();
+        const upgradeScopeRaw = String(i.upgrade_scope || 'wanted').toLowerCase();
+        const upgradeScope = (upgradeScopeRaw === 'all_monitored') ? 'both' : upgradeScopeRaw;
         const wantedPills =
           `${asPill(!!i.search_missing, 'MISS', 'Search missing items')}` +
-          ` ${asPill(!!i.search_cutoff_unmet, 'UPG', upgradeScope === 'all_monitored' ? 'Search upgrades across all monitored items with files' : 'Search upgrades from the Arr wanted list')}`;
+          ` ${asPill(!!i.search_cutoff_unmet, 'UPG', upgradeScope === 'wanted' ? 'Search upgrades from the Arr wanted list' : upgradeScope === 'monitored' ? 'Search upgrades across monitored items with files only' : 'Search upgrades from both the Arr wanted list and monitored items with files')}`;
         iBody.innerHTML += `<tr>
           <td>${safe(i.app)}</td>
           <td>${safe(i.instance_name)} <span class="mono" style="color: var(--text-muted);">#${safe(i.instance_id)}</span></td>
@@ -1724,7 +1725,8 @@ def create_app(config_path: str) -> Flask:
       for (const inst of (data.instances || [])) {
         const key = `${inst.app}:${inst.instance_id}`;
         const mode = String(inst.sonarr_missing_mode || 'smart').toLowerCase();
-        const upgradeScope = String(inst.upgrade_scope || 'wanted').toLowerCase();
+        const upgradeScopeRaw = String(inst.upgrade_scope || 'wanted').toLowerCase();
+        const upgradeScope = (upgradeScopeRaw === 'all_monitored') ? 'both' : upgradeScopeRaw;
         const order = String(inst.search_order || 'smart').toLowerCase();
         const orderUi = `
             <div class="field" style="margin-top:10px;">
@@ -1773,10 +1775,11 @@ def create_app(config_path: str) -> Flask:
               <div class="label">Upgrade Source</div>
               <select class="cfg si_upgrade_scope">
                 <option value="wanted" ${upgradeScope === 'wanted' ? 'selected' : ''}>Wanted List Only</option>
-                <option value="all_monitored" ${upgradeScope === 'all_monitored' ? 'selected' : ''}>All Monitored Items</option>
+                <option value="monitored" ${upgradeScope === 'monitored' ? 'selected' : ''}>Monitored Items Only</option>
+                <option value="both" ${upgradeScope === 'both' ? 'selected' : ''}>Both</option>
               </select>
               <div class="subline" style="margin-top:6px;">
-                All Monitored Items re-searches tracked titles with existing files for better releases, even when they are no longer in the Arr wanted list.
+                Wanted List Only = Arr's upgrade list. Monitored Items Only = monitored items with files. Both = both sources together.
               </div>
             </div>
         `;

@@ -22,7 +22,8 @@ radarr:
       search_cutoff_unmet: true
       # Upgrade source:
       # - wanted: only items Arr still lists as upgrade candidates
-      # - all_monitored: re-search monitored items that already have files
+      # - monitored: only monitored items that already have files, even if Arr no longer lists them
+      # - both: Arr's upgrade list plus monitored items that already have files
       upgrade_scope: wanted
       # Search order: newest (default), random, oldest
       # Smart mode: recent (today/yesterday) first, then random, then oldest last.
@@ -50,6 +51,9 @@ sonarr:
       interval_minutes: 15
       search_missing: true
       search_cutoff_unmet: true
+      # wanted = Arr upgrade list only
+      # monitored = monitored items with files only
+      # both = Arr upgrade list plus monitored items with files
       upgrade_scope: wanted
       search_order: smart
       quiet_hours_start: "23:00"

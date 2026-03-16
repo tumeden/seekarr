@@ -45,6 +45,7 @@ def _config_view(config: RuntimeConfig, store: StateStore) -> dict[str, Any]:
             "interval_minutes": inst.interval_minutes,
             "search_missing": bool(getattr(inst, "search_missing", True)),
             "search_cutoff_unmet": bool(getattr(inst, "search_cutoff_unmet", True)),
+            "upgrade_scope": str(getattr(inst, "upgrade_scope", "wanted") or "wanted"),
             "search_order": str(getattr(inst, "search_order", "smart") or "smart"),
             "quiet_hours_start": str(getattr(inst, "quiet_hours_start", None) or config.app.quiet_hours_start or ""),
             "quiet_hours_end": str(getattr(inst, "quiet_hours_end", None) or config.app.quiet_hours_end or ""),
@@ -163,6 +164,7 @@ def create_app(config_path: str) -> Flask:
                         "interval_minutes": int(inst.interval_minutes),
                         "search_missing": 1 if bool(inst.search_missing) else 0,
                         "search_cutoff_unmet": 1 if bool(inst.search_cutoff_unmet) else 0,
+                        "upgrade_scope": str(getattr(inst, "upgrade_scope", "wanted") or "wanted").strip().lower(),
                         "search_order": str(inst.search_order or "smart").strip().lower(),
                         "quiet_hours_start": str(inst.quiet_hours_start or "").strip(),
                         "quiet_hours_end": str(inst.quiet_hours_end or "").strip(),
@@ -249,7 +251,7 @@ def create_app(config_path: str) -> Flask:
                 iv = _to_int(ov.get(f))
                 if iv is not None:
                     updates[f] = iv
-            for f in ("search_order", "quiet_hours_start", "quiet_hours_end", "sonarr_missing_mode"):
+            for f in ("upgrade_scope", "search_order", "quiet_hours_start", "quiet_hours_end", "sonarr_missing_mode"):
                 v = ov.get(f)
                 if v is not None:
                     updates[f] = str(v).strip()
@@ -1518,9 +1520,10 @@ def create_app(config_path: str) -> Flask:
       for (const i of data.config.instances) {
         const key = `${i.app}:${i.instance_id}`;
         const s = syncMap[key] || {};
+        const upgradeScope = String(i.upgrade_scope || 'wanted').toLowerCase();
         const wantedPills =
           `${asPill(!!i.search_missing, 'MISS', 'Search missing items')}` +
-          ` ${asPill(!!i.search_cutoff_unmet, 'UPG', 'Search upgrades (cutoff unmet)')}`;
+          ` ${asPill(!!i.search_cutoff_unmet, 'UPG', upgradeScope === 'all_monitored' ? 'Search upgrades across all monitored items with files' : 'Search upgrades from the Arr wanted list')}`;
         iBody.innerHTML += `<tr>
           <td>${safe(i.app)}</td>
           <td>${safe(i.instance_name)} <span class="mono" style="color: var(--text-muted);">#${safe(i.instance_id)}</span></td>
@@ -1721,6 +1724,7 @@ def create_app(config_path: str) -> Flask:
       for (const inst of (data.instances || [])) {
         const key = `${inst.app}:${inst.instance_id}`;
         const mode = String(inst.sonarr_missing_mode || 'smart').toLowerCase();
+        const upgradeScope = String(inst.upgrade_scope || 'wanted').toLowerCase();
         const order = String(inst.search_order || 'smart').toLowerCase();
         const orderUi = `
             <div class="field" style="margin-top:10px;">
@@ -1763,6 +1767,16 @@ def create_app(config_path: str) -> Flask:
               <div class="field">
                 <div class="label">Upgrades Per Run</div>
                 <input class="cfg si_upgrades_per_run" type="number" min="0" value="${safe(inst.max_cutoff_actions_per_instance_per_sync)}"/>
+              </div>
+            </div>
+            <div class="field" style="margin-top:10px;">
+              <div class="label">Upgrade Source</div>
+              <select class="cfg si_upgrade_scope">
+                <option value="wanted" ${upgradeScope === 'wanted' ? 'selected' : ''}>Wanted List Only</option>
+                <option value="all_monitored" ${upgradeScope === 'all_monitored' ? 'selected' : ''}>All Monitored Items</option>
+              </select>
+              <div class="subline" style="margin-top:6px;">
+                All Monitored Items re-searches tracked titles with existing files for better releases, even when they are no longer in the Arr wanted list.
               </div>
             </div>
         `;
@@ -1863,6 +1877,7 @@ def create_app(config_path: str) -> Flask:
           interval_minutes: Number(tr.querySelector('.si_interval')?.value || 0),
           search_missing: !!tr.querySelector('.si_missing')?.checked,
           search_cutoff_unmet: !!tr.querySelector('.si_cutoff')?.checked,
+          upgrade_scope: String(tr.querySelector('.si_upgrade_scope')?.value || 'wanted'),
           search_order: String(tr.querySelector('.si_search_order')?.value || 'smart'),
           quiet_hours_start: String(tr.querySelector('.si_quiet_start')?.value || '').trim(),
           quiet_hours_end: String(tr.querySelector('.si_quiet_end')?.value || '').trim(),
@@ -1995,6 +2010,7 @@ def create_app(config_path: str) -> Flask:
                     "interval_minutes": max(1, int(row.get("interval_minutes") or 15)),
                     "search_missing": 1 if bool(row.get("search_missing", True)) else 0,
                     "search_cutoff_unmet": 1 if bool(row.get("search_cutoff_unmet", True)) else 0,
+                    "upgrade_scope": str(row.get("upgrade_scope") or "wanted").strip().lower(),
                     "search_order": str(row.get("search_order") or "smart").strip().lower(),
                     "quiet_hours_start": str(row.get("quiet_hours_start") or "").strip(),
                     "quiet_hours_end": str(row.get("quiet_hours_end") or "").strip(),

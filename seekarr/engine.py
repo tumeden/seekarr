@@ -403,11 +403,21 @@ class Engine:
                 client.fetch_wanted_movies(
                     search_missing=bool(getattr(instance, "search_missing", True)),
                     search_cutoff_unmet=bool(getattr(instance, "search_cutoff_unmet", True)),
+                    search_all_monitored=(
+                        bool(getattr(instance, "search_cutoff_unmet", True))
+                        and str(getattr(instance, "upgrade_scope", "wanted") or "wanted").strip().lower()
+                        == "all_monitored"
+                    ),
                 )
                 if app_type == "radarr"
                 else client.fetch_wanted_episodes(
                     search_missing=bool(getattr(instance, "search_missing", True)),
                     search_cutoff_unmet=bool(getattr(instance, "search_cutoff_unmet", True)),
+                    search_all_monitored=(
+                        bool(getattr(instance, "search_cutoff_unmet", True))
+                        and str(getattr(instance, "upgrade_scope", "wanted") or "wanted").strip().lower()
+                        == "all_monitored"
+                    ),
                 )
             )
             # Specials (Season 00) are absolute lowest priority. Only process them when there is
@@ -419,8 +429,9 @@ class Engine:
 
             # Priority:
             # 1) missing items first (new content)
-            # 2) then cutoff-unmet items (upgrades)
-            # 3) within each group: newest (closest to release/air date) first
+            # 2) then Arr-reported upgrade items
+            # 3) then optional full-library upgrade scans
+            # 4) within each group: newest (closest to release/air date) first
             # Items without a known date are processed last.
             if app_type == "radarr":
 
@@ -434,26 +445,35 @@ class Engine:
                     return (1, dt.timestamp()) if dt else (0, 0.0)
 
             missing_items = [w for w in wanted if str(getattr(w, "wanted_kind", "missing")).lower() == "missing"]
-            cutoff_items = [w for w in wanted if str(getattr(w, "wanted_kind", "missing")).lower() != "missing"]
+            cutoff_items = [w for w in wanted if str(getattr(w, "wanted_kind", "")).lower() == "cutoff"]
+            monitored_upgrade_items = [w for w in wanted if str(getattr(w, "wanted_kind", "")).lower() == "monitored"]
             if app_type == "sonarr":
                 queued_episode_ids = client.fetch_queue_episode_ids()
                 if queued_episode_ids:
                     before_missing = len(missing_items)
                     before_cutoff = len(cutoff_items)
+                    before_monitored = len(monitored_upgrade_items)
                     missing_items = [
                         ep for ep in missing_items if int(getattr(ep, "episode_id", 0) or 0) not in queued_episode_ids
                     ]
                     cutoff_items = [
                         ep for ep in cutoff_items if int(getattr(ep, "episode_id", 0) or 0) not in queued_episode_ids
                     ]
+                    monitored_upgrade_items = [
+                        ep
+                        for ep in monitored_upgrade_items
+                        if int(getattr(ep, "episode_id", 0) or 0) not in queued_episode_ids
+                    ]
                     skipped_missing = before_missing - len(missing_items)
                     skipped_cutoff = before_cutoff - len(cutoff_items)
-                    if (skipped_missing + skipped_cutoff) > 0:
+                    skipped_monitored = before_monitored - len(monitored_upgrade_items)
+                    if (skipped_missing + skipped_cutoff + skipped_monitored) > 0:
                         self.logger.info(
-                            "Skipped %s Sonarr wanted episodes already in queue (%s missing, %s cutoff) for %s",
-                            skipped_missing + skipped_cutoff,
+                            "Skipped %s Sonarr wanted episodes already in queue (%s missing, %s upgrades, %s full-library) for %s",
+                            skipped_missing + skipped_cutoff + skipped_monitored,
                             skipped_missing,
                             skipped_cutoff,
+                            skipped_monitored,
                             instance.instance_name,
                         )
                         if progress_cb:
@@ -466,6 +486,7 @@ class Engine:
                                     "queued_total": len(queued_episode_ids),
                                     "skipped_missing": skipped_missing,
                                     "skipped_cutoff": skipped_cutoff,
+                                    "skipped_monitored": skipped_monitored,
                                 }
                             )
             search_order = str(getattr(instance, "search_order", "newest") or "newest").strip().lower()
@@ -611,14 +632,17 @@ class Engine:
             if search_order == "smart":
                 missing_items = _smart_order(missing_items)
                 cutoff_items = _smart_order(cutoff_items)
+                monitored_upgrade_items = _smart_order(monitored_upgrade_items)
             elif search_order == "random":
                 random.shuffle(missing_items)
                 random.shuffle(cutoff_items)
+                random.shuffle(monitored_upgrade_items)
             else:
                 reverse = search_order == "newest"
                 missing_items.sort(key=_date_key, reverse=reverse)
                 cutoff_items.sort(key=_date_key, reverse=reverse)
-            wanted = missing_items + cutoff_items
+                monitored_upgrade_items.sort(key=_date_key, reverse=reverse)
+            wanted = missing_items + cutoff_items + monitored_upgrade_items
             wanted_count = len(wanted)
             stats.wanted_total += wanted_count
 
@@ -1059,8 +1083,10 @@ class Engine:
                 if app_type == "sonarr":
                     missing_items = sorted(missing_items, key=_episode_order_key)
                     cutoff_items = sorted(cutoff_items, key=_episode_order_key)
+                    monitored_upgrade_items = sorted(monitored_upgrade_items, key=_episode_order_key)
                 _process(missing_items, missing_cap, "missing")
             _process(cutoff_items, cutoff_cap, "cutoff")
+            _process(monitored_upgrade_items, cutoff_cap, "cutoff")
             wakeup_iso = None
             if next_eligible_wakeup_utc:
                 now_utc = datetime.now(timezone.utc)

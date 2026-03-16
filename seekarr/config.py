@@ -42,6 +42,10 @@ class ArrSyncInstanceConfig:
     interval_minutes: int
     search_missing: bool
     search_cutoff_unmet: bool
+    # Upgrade source:
+    # - "wanted": only items Arr still reports as upgrade candidates (default)
+    # - "all_monitored": any monitored item with a file can be re-searched for a better release
+    upgrade_scope: str
     # Selection order when choosing what to search this cycle.
     # - newest: newest air/release date first (default)
     # - random: random order
@@ -93,6 +97,15 @@ def _require_str(data: dict[str, Any], key: str, default: str = "") -> str:
     if value is None:
         return default
     return str(value).strip()
+
+
+def _normalize_upgrade_scope(value: Any) -> str:
+    scope = str(value or "").strip().lower()
+    if scope in ("all", "all_monitored", "library", "monitored", "full_library"):
+        return "all_monitored"
+    if scope in ("wanted", "wanted_only", "cutoff", "cutoff_only"):
+        return "wanted"
+    return "wanted"
 
 
 def _load_dotenv_if_present(config_path: Path) -> None:
@@ -173,6 +186,7 @@ def _ensure_config_exists(config_path: Path) -> None:
                         "interval_minutes": 15,
                         "search_missing": True,
                         "search_cutoff_unmet": True,
+                        "upgrade_scope": "wanted",
                         "search_order": "smart",
                         "quiet_hours_start": "23:00",
                         "quiet_hours_end": "06:00",
@@ -196,6 +210,7 @@ def _ensure_config_exists(config_path: Path) -> None:
                         "interval_minutes": 15,
                         "search_missing": True,
                         "search_cutoff_unmet": True,
+                        "upgrade_scope": "wanted",
                         "search_order": "smart",
                         "quiet_hours_start": "23:00",
                         "quiet_hours_end": "06:00",
@@ -283,6 +298,7 @@ def load_config(path: str) -> RuntimeConfig:
                     # "Missing" = new content not yet grabbed, "cutoff unmet" = upgrades until cutoff.
                     search_missing=bool(row.get("search_missing", True)),
                     search_cutoff_unmet=bool(row.get("search_cutoff_unmet", True)),
+                    upgrade_scope=_normalize_upgrade_scope(row.get("upgrade_scope", "wanted")),
                     search_order=_require_str(row, "search_order", "smart").lower(),
                     quiet_hours_start=(
                         _require_str(row, "quiet_hours_start", "") if row.get("quiet_hours_start") is not None else None
@@ -359,6 +375,7 @@ def load_config(path: str) -> RuntimeConfig:
                     interval_minutes=15,
                     search_missing=True,
                     search_cutoff_unmet=True,
+                    upgrade_scope="wanted",
                     search_order="smart",
                     quiet_hours_start=None,
                     quiet_hours_end=None,
@@ -386,6 +403,7 @@ def load_config(path: str) -> RuntimeConfig:
                     interval_minutes=15,
                     search_missing=True,
                     search_cutoff_unmet=True,
+                    upgrade_scope="wanted",
                     search_order="smart",
                     quiet_hours_start=None,
                     quiet_hours_end=None,

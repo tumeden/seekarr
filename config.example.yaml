@@ -17,9 +17,13 @@ radarr:
       interval_minutes: 15
       # Search types:
       # - missing: new content not yet grabbed
-      # - cutoff_unmet: upgrades until your quality cutoff is met
+      # - upgrades: searches for better releases
       search_missing: true
       search_cutoff_unmet: true
+      # Upgrade source:
+      # - wanted: only items Arr still lists as upgrade candidates
+      # - all_monitored: re-search monitored items that already have files
+      upgrade_scope: wanted
       # Search order: newest (default), random, oldest
       # Smart mode: recent (today/yesterday) first, then random, then oldest last.
       search_order: smart
@@ -46,6 +50,7 @@ sonarr:
       interval_minutes: 15
       search_missing: true
       search_cutoff_unmet: true
+      upgrade_scope: wanted
       search_order: smart
       quiet_hours_start: "23:00"
       quiet_hours_end: "06:00"

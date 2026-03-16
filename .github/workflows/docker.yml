@@ -84,7 +84,7 @@ jobs:
           password: ${{ env.DOCKERHUB_TOKEN }}
 
       - name: Build GHCR (and optionally push)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -98,7 +98,7 @@ jobs:
 
       - name: Build Docker Hub (and optionally push)
         if: env.DOCKERHUB_TOKEN != ''
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64

@@ -114,6 +114,66 @@ sonarr:
     assert cfg.sonarr_instances[0].sonarr_missing_mode == "smart"
 
 
+def test_upgrade_scope_parsed(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        """
+app:
+  db_path: "./state/seekarr.db"
+  request_timeout_seconds: 30
+  verify_ssl: true
+  log_level: INFO
+
+radarr:
+  instances:
+    - instance_id: 1
+      instance_name: Radarr Main
+      enabled: true
+      interval_minutes: 25
+      search_missing: false
+      search_cutoff_unmet: true
+      upgrade_scope: monitored
+      radarr:
+        url: http://localhost:7878
+        api_key: "abc"
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+    assert cfg.radarr_instances[0].upgrade_scope == "monitored"
+
+
+def test_upgrade_scope_legacy_all_monitored_maps_to_both(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        """
+app:
+  db_path: "./state/seekarr.db"
+  request_timeout_seconds: 30
+  verify_ssl: true
+  log_level: INFO
+
+radarr:
+  instances:
+    - instance_id: 1
+      instance_name: Radarr Main
+      enabled: true
+      interval_minutes: 25
+      search_missing: false
+      search_cutoff_unmet: true
+      upgrade_scope: all_monitored
+      radarr:
+        url: http://localhost:7878
+        api_key: "abc"
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+    assert cfg.radarr_instances[0].upgrade_scope == "both"
+
+
 def test_quiet_hours_timezone_parsed(tmp_path: Path) -> None:
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(

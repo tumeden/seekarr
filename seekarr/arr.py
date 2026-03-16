@@ -70,7 +70,7 @@ class WantedMovie:
     tmdb_id: int
     imdb_id: str
     release_date_utc: str | None = None
-    wanted_kind: str = "missing"  # "missing" or "cutoff"
+    wanted_kind: str = "missing"  # "missing", "cutoff", or "monitored"
 
     @property
     def item_key(self) -> str:
@@ -86,7 +86,7 @@ class WantedEpisode:
     season_number: int
     episode_number: int
     air_date_utc: str | None = None
-    wanted_kind: str = "missing"  # "missing" or "cutoff"
+    wanted_kind: str = "missing"  # "missing", "cutoff", or "monitored"
 
     @property
     def item_key(self) -> str:
@@ -330,14 +330,102 @@ class ArrClient:
             return lookup
         return lookup
 
-    def fetch_wanted_movies(self, search_missing: bool = True, search_cutoff_unmet: bool = True) -> list[WantedMovie]:
+    def fetch_monitored_movies_for_upgrades(self) -> list[WantedMovie]:
+        if not self.config.enabled or self.name != "radarr":
+            return []
+        payload = self._request("GET", "/api/v3/movie")
+        if not isinstance(payload, list):
+            return []
+        out: list[WantedMovie] = []
+        for row in payload:
+            if not isinstance(row, dict):
+                continue
+            movie_id = int(row.get("id") or 0)
+            if movie_id <= 0:
+                continue
+            monitored = _as_bool(row.get("monitored"))
+            if monitored is False:
+                continue
+            movie_file = row.get("movieFile") if isinstance(row.get("movieFile"), dict) else {}
+            has_file = _as_bool(row.get("hasFile"))
+            if has_file is None and movie_file:
+                has_file = _as_bool(movie_file.get("hasFile"))
+            if has_file is None:
+                has_file = bool(movie_file)
+            if not has_file:
+                continue
+            release_utc = row.get("digitalRelease") or row.get("physicalRelease") or row.get("inCinemas") or None
+            out.append(
+                WantedMovie(
+                    movie_id=movie_id,
+                    title=str(row.get("title") or "").strip(),
+                    year=int(row.get("year") or 0),
+                    tmdb_id=int(row.get("tmdbId") or 0),
+                    imdb_id=str(row.get("imdbId") or "").lower(),
+                    release_date_utc=str(release_utc) if release_utc else None,
+                    wanted_kind="monitored",
+                )
+            )
+        return out
+
+    def fetch_monitored_episodes_for_upgrades(self) -> list[WantedEpisode]:
+        if not self.config.enabled or self.name != "sonarr":
+            return []
+        out: list[WantedEpisode] = []
+        for series_id, (series_title, series_tvdb_id, series_monitored) in self._fetch_series_lookup().items():
+            if not series_monitored:
+                continue
+            payload = self._request("GET", "/api/v3/episode", params={"seriesId": int(series_id)})
+            if not isinstance(payload, list):
+                continue
+            for row in payload:
+                if not isinstance(row, dict):
+                    continue
+                episode_id = int(row.get("id") or row.get("episodeId") or 0)
+                if episode_id <= 0:
+                    continue
+                ep_monitored = _as_bool(row.get("monitored"))
+                if ep_monitored is False:
+                    continue
+                episode_file = row.get("episodeFile") if isinstance(row.get("episodeFile"), dict) else {}
+                has_file = _as_bool(row.get("hasFile"))
+                if has_file is None and episode_file:
+                    has_file = _as_bool(episode_file.get("hasFile"))
+                if has_file is None:
+                    has_file = bool(episode_file)
+                if not has_file:
+                    continue
+                out.append(
+                    WantedEpisode(
+                        episode_id=episode_id,
+                        series_id=int(series_id),
+                        series_title=str(series_title or "").strip(),
+                        series_tvdb_id=int(series_tvdb_id or 0),
+                        season_number=int(row.get("seasonNumber") or 0),
+                        episode_number=int(row.get("episodeNumber") or 0),
+                        air_date_utc=(
+                            str(row.get("airDateUtc") or row.get("airDate")).strip()
+                            if (row.get("airDateUtc") or row.get("airDate"))
+                            else None
+                        ),
+                        wanted_kind="monitored",
+                    )
+                )
+        return out
+
+    def fetch_wanted_movies(
+        self,
+        search_missing: bool = True,
+        search_cutoff_unmet: bool = True,
+        search_all_monitored: bool = False,
+    ) -> list[WantedMovie]:
         if not self.config.enabled:
             return []
         movie_meta = self._fetch_movie_meta_lookup()
         missing_rows = self._fetch_paged_records("/api/v3/wanted/missing") if search_missing else []
         cutoff_rows = self._fetch_paged_records("/api/v3/wanted/cutoff") if search_cutoff_unmet else []
         out: dict[int, WantedMovie] = {}
-        # "missing" items should win when an item appears in both lists.
+        # Priority: missing -> wanted upgrades -> monitored upgrades.
         for wanted_kind, rows in (("missing", missing_rows), ("cutoff", cutoff_rows)):
             for row in rows:
                 movie_id = int(row.get("id") or row.get("movieId") or 0)
@@ -379,10 +467,18 @@ class ArrClient:
                     wanted_kind=wanted_kind,
                 )
                 out[movie_id] = item
+        if search_all_monitored:
+            for item in self.fetch_monitored_movies_for_upgrades():
+                if item.movie_id in out:
+                    continue
+                out[item.movie_id] = item
         return list(out.values())
 
     def fetch_wanted_episodes(
-        self, search_missing: bool = True, search_cutoff_unmet: bool = True
+        self,
+        search_missing: bool = True,
+        search_cutoff_unmet: bool = True,
+        search_all_monitored: bool = False,
     ) -> list[WantedEpisode]:
         if not self.config.enabled:
             return []
@@ -390,7 +486,7 @@ class ArrClient:
         cutoff_rows = self._fetch_paged_records("/api/v3/wanted/cutoff") if search_cutoff_unmet else []
         series_lookup = self._fetch_series_lookup()
         out: dict[int, WantedEpisode] = {}
-        # "missing" items should win when an item appears in both lists.
+        # Priority: missing -> wanted upgrades -> monitored upgrades.
         for wanted_kind, rows in (("missing", missing_rows), ("cutoff", cutoff_rows)):
             for row in rows:
                 episode_id = int(row.get("id") or row.get("episodeId") or 0)
@@ -430,6 +526,11 @@ class ArrClient:
                     wanted_kind=wanted_kind,
                 )
                 out[episode_id] = item
+        if search_all_monitored:
+            for item in self.fetch_monitored_episodes_for_upgrades():
+                if item.episode_id in out:
+                    continue
+                out[item.episode_id] = item
         return list(out.values())
 
     def trigger_movie_search(self, movie_id: int) -> bool:

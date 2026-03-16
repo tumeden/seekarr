@@ -19,7 +19,7 @@
   <img alt="License" src="https://img.shields.io/github/license/tumeden/seekarr?style=flat&label=License">
 </p>
 
-Seekarr automatically triggers Radarr/Sonarr searches for monitored items in your library (missing and/or cutoff-unmet), with scheduling, cooldowns, and rate limits.
+Seekarr automatically triggers Radarr/Sonarr searches for monitored items in your library, with scheduling, cooldowns, and rate limits.
 
 <!-- screenshots -->
 <img width="1129" height="515" alt="image" src="https://github.com/user-attachments/assets/f754e7dc-5bb7-4f13-9b42-3b3b6fb495ae" />
@@ -30,12 +30,19 @@ Seekarr automatically triggers Radarr/Sonarr searches for monitored items in you
 
 ## What It Does
 
-- Pulls wanted lists from Radarr/Sonarr (missing and/or cutoff-unmet).
+- Pulls missing items and upgrade candidates from Radarr/Sonarr.
+- Optionally re-searches all monitored items with files for better upgrades.
 - Triggers searches per instance on configured intervals.
 - Tracks item cooldowns in SQLite to avoid repeated spam searches.
 - Applies pacing and rate limits.
 - Skips unreleased content until the configured delay passes.
 - Supports quiet hours (with configurable timezone in Web UI).
+
+Upgrade source modes:
+
+- `Wanted List Only`: only Arr's current upgrade candidates.
+- `Monitored Items Only`: monitored items with files, even if Arr no longer lists them as upgrades.
+- `Both`: combines Arr's upgrade candidates with monitored items that already have files.
 
 ---
 

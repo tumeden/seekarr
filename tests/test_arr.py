@@ -156,3 +156,82 @@ def test_fetch_wanted_movies_skips_cutoff_items_already_met(monkeypatch) -> None
 
     out = client.fetch_wanted_movies(search_missing=False, search_cutoff_unmet=True)
     assert [x.movie_id for x in out] == [202]
+
+
+def test_fetch_wanted_movies_can_include_all_monitored_upgrade_candidates(monkeypatch) -> None:
+    client = ArrClient(
+        name="radarr",
+        config=ArrConfig(enabled=True, url="http://example", api_key="abc"),
+        timeout_seconds=5,
+        verify_ssl=True,
+        logger=logging.getLogger("test"),
+    )
+
+    payload = [
+        {
+            "id": 301,
+            "title": "Movie A",
+            "year": 2024,
+            "tmdbId": 30,
+            "imdbId": "tt30",
+            "monitored": True,
+            "hasFile": True,
+            "digitalRelease": "2025-01-01T00:00:00Z",
+        },
+        {
+            "id": 302,
+            "title": "Movie B",
+            "year": 2024,
+            "tmdbId": 31,
+            "imdbId": "tt31",
+            "monitored": True,
+            "hasFile": False,
+        },
+    ]
+
+    monkeypatch.setattr(client, "_fetch_paged_records", lambda path: [])
+    monkeypatch.setattr(client, "_fetch_movie_meta_lookup", lambda: {})
+    monkeypatch.setattr(client, "_request", lambda method, path, params=None, json_data=None: payload)
+
+    out = client.fetch_wanted_movies(search_missing=False, search_cutoff_unmet=False, search_all_monitored=True)
+    assert [(x.movie_id, x.wanted_kind) for x in out] == [(301, "monitored")]
+
+
+def test_fetch_wanted_episodes_can_include_all_monitored_upgrade_candidates(monkeypatch) -> None:
+    client = ArrClient(
+        name="sonarr",
+        config=ArrConfig(enabled=True, url="http://example", api_key="abc"),
+        timeout_seconds=5,
+        verify_ssl=True,
+        logger=logging.getLogger("test"),
+    )
+
+    monkeypatch.setattr(client, "_fetch_paged_records", lambda path: [])
+    monkeypatch.setattr(client, "_fetch_series_lookup", lambda: {1: ("Show", 11, True)})
+
+    def _fake_request(method, path, params=None, json_data=None):  # noqa: ANN001
+        assert method == "GET"
+        assert path == "/api/v3/episode"
+        assert params == {"seriesId": 1}
+        return [
+            {
+                "id": 401,
+                "seasonNumber": 1,
+                "episodeNumber": 2,
+                "monitored": True,
+                "hasFile": True,
+                "airDateUtc": "2025-01-02T00:00:00Z",
+            },
+            {
+                "id": 402,
+                "seasonNumber": 1,
+                "episodeNumber": 3,
+                "monitored": True,
+                "hasFile": False,
+            },
+        ]
+
+    monkeypatch.setattr(client, "_request", _fake_request)
+
+    out = client.fetch_wanted_episodes(search_missing=False, search_cutoff_unmet=False, search_all_monitored=True)
+    assert [(x.episode_id, x.wanted_kind) for x in out] == [(401, "monitored")]

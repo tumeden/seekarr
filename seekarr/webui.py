@@ -612,12 +612,15 @@ def create_app(config_path: str) -> Flask:
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Seekarr</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      /* Seekarr: orange + black theme */
-      --bg-primary: #0b0b0c;
-      --bg-secondary: #101113;
-      --bg-tertiary: #17181b;
+      /* Seekarr: modern dark theme */
+      --bg-primary: #090a0c;
+      --bg-secondary: #111318;
+      --bg-tertiary: #181b21;
       --text-primary: #f8fafc;
       --text-secondary: #e2e8f0;
       --text-muted: #94a3b8;
@@ -626,13 +629,22 @@ def create_app(config_path: str) -> Flask:
       --success-color: #22c55e;
       --warning-color: #f59e0b;
       --error-color: #ef4444;
-      --glass-bg: rgba(16, 17, 19, 0.72);
-      --glass-border: rgba(249, 115, 22, 0.18);
+      --glass-bg: rgba(17, 19, 24, 0.65);
+      --glass-border: rgba(249, 115, 22, 0.12);
       --radius-md: 10px;
       --radius-lg: 14px;
+      --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; font-family: "Segoe UI", Arial, sans-serif; background: var(--bg-primary); color: var(--text-primary); }
+    html, body {
+      margin: 0;
+      height: 100%;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+    }
+
     .app {
       display: grid;
       grid-template-columns: 220px 1fr;
@@ -651,19 +663,42 @@ def create_app(config_path: str) -> Flask:
       margin-bottom: 14px;
     }
     .nav-item {
-      display: block;
+      display: flex;
+      align-items: center;
+      gap: 10px;
       text-decoration: none;
       color: var(--text-muted);
-      padding: 10px 12px;
-      margin-bottom: 8px;
+      padding: 10px 14px;
+      margin-bottom: 6px;
       border-radius: 8px;
-      background: rgba(30, 41, 59, 0.35);
+      font-weight: 500;
+      font-size: 14px;
+      background: transparent;
       border: 1px solid transparent;
+      border-left: 3px solid transparent;
+      transition: var(--transition);
+    }
+    .nav-item svg {
+      width: 18px;
+      height: 18px;
+      opacity: 0.7;
+      transition: var(--transition);
+    }
+    .nav-item:hover {
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text-secondary);
+    }
+    .nav-item:hover svg {
+      opacity: 1;
     }
     .nav-item.active {
       color: #fff;
-      border-color: rgba(249, 115, 22, 0.40);
-      background: rgba(249, 115, 22, 0.18);
+      background: linear-gradient(90deg, rgba(249, 115, 22, 0.15), transparent);
+      border-left: 3px solid var(--accent-color);
+    }
+    .nav-item.active svg {
+      color: var(--accent-color);
+      opacity: 1;
     }
     .sidebar-badges {
       margin-top: 12px;
@@ -732,9 +767,13 @@ def create_app(config_path: str) -> Flask:
       border: 0;
       border-radius: 8px;
       cursor: pointer;
-      padding: 9px 14px;
+      padding: 9px 16px;
       font-weight: 600;
       color: #fff;
+      transition: var(--transition);
+    }
+    button:active {
+      transform: scale(0.97);
     }
     #run { background: var(--accent-color); }
     #run:hover { background: var(--accent-hover); }
@@ -797,6 +836,24 @@ def create_app(config_path: str) -> Flask:
     }
     .stat-label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
     .stat-value { margin-top: 4px; font-size: 22px; font-weight: 700; color: var(--text-secondary); }
+    .field { display: block; }
+    .info-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      margin-left: 6px;
+      vertical-align: middle;
+      color: var(--accent-color);
+      cursor: help;
+      opacity: 0.7;
+      transition: opacity 0.2s, transform 0.2s;
+    }
+    .info-icon:hover { 
+      opacity: 1;
+      transform: scale(1.1);
+    }
     .card {
       background: var(--glass-bg);
       border: 1px solid var(--glass-border);
@@ -807,8 +864,9 @@ def create_app(config_path: str) -> Flask:
     .card h3 { margin: 0 0 10px 0; font-size: 14px; color: var(--text-secondary); }
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid rgba(71, 85, 105, 0.35); white-space: nowrap; }
-    th { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); white-space: nowrap; transition: background 0.2s; }
+    tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
+    th { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
     td { color: var(--text-secondary); }
     .mono { font-family: Consolas, monospace; }
 
@@ -831,13 +889,13 @@ def create_app(config_path: str) -> Flask:
     /* UI refresh (no framework) */
     body {
       background:
-        radial-gradient(900px 520px at 12% 10%, rgba(249, 115, 22, 0.18), transparent 60%),
-        radial-gradient(900px 520px at 86% 18%, rgba(34, 197, 94, 0.12), transparent 55%),
-        linear-gradient(180deg, #0b0b0c, #070707);
+        radial-gradient(900px 520px at 12% 10%, rgba(249, 115, 22, 0.12), transparent 60%),
+        radial-gradient(900px 520px at 86% 18%, rgba(34, 197, 94, 0.08), transparent 55%),
+        linear-gradient(180deg, var(--bg-primary), #050505);
     }
     .sidebar {
-      background: linear-gradient(180deg, rgba(11, 11, 12, 0.92), rgba(7, 7, 7, 0.96));
-      backdrop-filter: blur(10px);
+      background: linear-gradient(180deg, rgba(14, 16, 20, 0.8), rgba(9, 10, 12, 0.9));
+      backdrop-filter: blur(16px);
     }
     .topbar {
       background: linear-gradient(180deg, rgba(16, 17, 19, 0.82), rgba(10, 10, 11, 0.92));
@@ -851,16 +909,19 @@ def create_app(config_path: str) -> Flask:
     .instance-card {
       position: relative;
       overflow: hidden;
-      padding: 14px;
-      border-color: rgba(255, 255, 255, 0.06);
+      padding: 16px;
+      border-color: rgba(255, 255, 255, 0.04);
       background:
-        radial-gradient(520px 220px at 12% 8%, rgba(255, 255, 255, 0.06), transparent 55%),
+        radial-gradient(520px 220px at 12% 8%, rgba(255, 255, 255, 0.04), transparent 55%),
         var(--glass-bg);
-      transition: transform 120ms ease, border-color 120ms ease;
+      backdrop-filter: blur(12px);
+      transition: var(--transition);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
     }
     .instance-card:hover {
-      transform: translateY(-1px);
-      border-color: rgba(249, 115, 22, 0.26);
+      transform: translateY(-3px);
+      border-color: rgba(249, 115, 22, 0.3);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4), 0 0 15px rgba(249, 115, 22, 0.1);
     }
     /* Keep per-app accents but stay within the orange brand. */
     .instance-card[data-app="radarr"] { --accent-app: rgba(249, 115, 22, 0.92); }
@@ -1082,11 +1143,23 @@ def create_app(config_path: str) -> Flask:
 
   <div class="app">
     <aside class="sidebar">
-      <div class="brand">Seekarr</div>
-      <a class="nav-item active" data-section="dashboard" href="#">Dashboard</a>
-      <a class="nav-item" data-section="instances" href="#">Instances</a>
-      <a class="nav-item" data-section="runs" href="#">Search History</a>
-      <a class="nav-item" data-section="settings" href="#">Settings</a>
+      <div class="brand" style="display: flex; align-items: center; gap: 8px; font-size: 18px; margin-bottom: 24px;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        Seekarr
+      </div>
+      <a class="nav-item active" data-section="dashboard" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+        Dashboard
+      </a>
+
+      <a class="nav-item" data-section="runs" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+        History
+      </a>
+      <a class="nav-item" data-section="settings" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        Configuration
+      </a>
       <div class="sidebar-badges">
         <a class="sidebar-badge" href="https://github.com/tumeden/seekarr" target="_blank" rel="noopener noreferrer">GitHub</a>
         <a class="sidebar-badge" href="https://hub.docker.com/r/tumeden/seekarr" target="_blank" rel="noopener noreferrer">Docker Hub</a>
@@ -1117,17 +1190,7 @@ def create_app(config_path: str) -> Flask:
         </div>
       </section>
 
-      <section class="content-section" id="section-instances">
-        <div class="card">
-          <h3>Instances</h3>
-          <div class="table-wrap">
-            <table id="instances">
-              <thead><tr><th>App</th><th>Name</th><th>Enabled</th><th>Wanted</th><th>Interval</th><th>Retry</th><th>Rate</th><th>Last Sync</th><th>Next Sync</th><th>Countdown</th><th>URL</th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
+
 
       <section class="content-section" id="section-runs">
         <div class="card">
@@ -1137,29 +1200,33 @@ def create_app(config_path: str) -> Flask:
       </section>
 
       <section class="content-section" id="section-settings">
-        <div class="card" style="margin-top:12px;">
-          <h3>Instances</h3>
-          <div class="subline">API keys are stored encrypted in the SQLite DB (not shown in UI).</div>
-          <div style="height:10px;"></div>
-          <div class="cards-grid" id="settings-instance-cards"></div>
+        <div id="settings-tabs" style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;"></div>
+        
+        <div id="settings-content-wrapper">
+          <div class="card settings-tab-content" id="settings-tab-global" style="margin-top:0; padding:20px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px; height:20px;"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+              <h3 style="margin:0; font-size:16px;">Global Configuration</h3>
+            </div>
+            <div class="subline" style="font-size:13px; margin-bottom:24px;">App-wide settings affecting all instances.</div>
+            
+            <div class="field" style="margin-top:16px; max-width:400px;">
+              <div class="label">Quiet Hours Timezone</div>
+              <input id="settings-quiet-timezone" class="cfg mono" type="text" list="timezone-options"
+                     placeholder="Search timezone (example: America/New_York)"/>
+              <datalist id="timezone-options"></datalist>
+            </div>
+            <div class="subline" style="margin-top:6px;">
+              Used for quiet start/end evaluation. Leave empty to use server/container local timezone.
+            </div>
+          </div>
+          
+          <div id="settings-instance-cards"></div>
         </div>
 
-        <div class="card" style="margin-top:12px;">
-          <h3>App</h3>
-          <div class="field">
-            <div class="label">Quiet Hours Timezone</div>
-            <input id="settings-quiet-timezone" class="cfg mono" type="text" list="timezone-options"
-                   placeholder="Search timezone (example: America/New_York)"/>
-            <datalist id="timezone-options"></datalist>
-          </div>
-          <div class="subline" style="margin-top:6px;">
-            Used for quiet start/end evaluation. Leave empty to use server/container local timezone.
-          </div>
-        </div>
-
-        <div class="actions" style="justify-content:flex-end; margin-top:12px;">
-          <button class="btn-mini" id="save-settings">SAVE</button>
-          <span class="subline" id="settings-msg" style="margin-left:10px;"></span>
+        <div class="actions" style="justify-content:flex-end; margin-top:20px; padding-top:20px; border-top:1px solid rgba(255,255,255,0.05);">
+          <span class="subline" id="settings-msg" style="margin-right:16px; font-size:14px; font-weight:600; color:var(--text-secondary);"></span>
+          <button class="btn-primary" id="save-settings" style="padding:10px 24px; font-size:14px; box-shadow: 0 4px 12px rgba(249, 115, 22, 0.2);">SAVE CONFIGURATION</button>
         </div>
       </section>
     </main>
@@ -1515,30 +1582,7 @@ def create_app(config_path: str) -> Flask:
         syncMap[`${s.app_type}:${s.instance_id}`] = s;
       }
 
-      const iBody = document.querySelector('#instances tbody');
-      iBody.innerHTML = '';
-      for (const i of data.config.instances) {
-        const key = `${i.app}:${i.instance_id}`;
-        const s = syncMap[key] || {};
-        const upgradeScopeRaw = String(i.upgrade_scope || 'wanted').toLowerCase();
-        const upgradeScope = (upgradeScopeRaw === 'all_monitored') ? 'both' : upgradeScopeRaw;
-        const wantedPills =
-          `${asPill(!!i.search_missing, 'MISS', 'Search missing items')}` +
-          ` ${asPill(!!i.search_cutoff_unmet, 'UPG', upgradeScope === 'wanted' ? 'Search upgrades from the Arr wanted list' : upgradeScope === 'monitored' ? 'Search upgrades across monitored items with files only' : 'Search upgrades from both the Arr wanted list and monitored items with files')}`;
-        iBody.innerHTML += `<tr>
-          <td>${safe(i.app)}</td>
-          <td>${safe(i.instance_name)} <span class="mono" style="color: var(--text-muted);">#${safe(i.instance_id)}</span></td>
-          <td>${asBadge(i.enabled)}</td>
-          <td>${wantedPills}</td>
-          <td>${safe(i.interval_minutes)}m</td>
-          <td>${safe(i.item_retry_hours)}h</td>
-          <td>${safe(i.rate_cap)}/${safe(i.rate_window_minutes)}m</td>
-          <td class="mono" title="${safe(s.last_sync_time) || ''}">${fmtTime(s.last_sync_time) || '-'}</td>
-          <td class="mono" title="${safe(s.next_sync_time) || ''}">${fmtTime(s.next_sync_time) || '-'}</td>
-          <td class="mono" data-next-sync="${safe(s.next_sync_time)}">${fmtCountdown(s.next_sync_time)}</td>
-          <td class="mono">${safe(i.arr_url)}</td>
-        </tr>`;
-      }
+
 
       const cards = document.getElementById('instance-cards');
       cards.innerHTML = '';
@@ -1581,59 +1625,114 @@ def create_app(config_path: str) -> Flask:
         const canForce = !!i.enabled;
         const disabledAttr = (!canForce || !!rs.running) ? 'disabled' : '';
         cards.innerHTML += `
-          <div class="instance-card" data-app="${safe(i.app)}">
-            <div class="instance-head">
-              <div class="instance-title">${safe(i.app).toUpperCase()} - ${safe(i.instance_name)} (#${safe(i.instance_id)})</div>
-              <div class="pill-row">
-                <span class="status ${statusClass}">${statusText}</span>
-                <button class="btn-mini" data-force-app="${safe(i.app)}" data-force-id="${safe(i.instance_id)}" ${disabledAttr}>FORCE</button>
+          <div class="instance-card" data-app="${safe(i.app)}" style="display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+              <div class="instance-head" style="margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 16px;">
+                <div class="instance-title" style="display:flex; align-items:center; gap:10px; font-size: 16px;">
+                  <svg width="20" height="20" fill="none" stroke="var(--accent-color)" stroke-width="2" viewBox="0 0 24 24" style="opacity:0.9;"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                  ${safe(i.app).toUpperCase()} - <span style="font-weight: 500;">${safe(i.instance_name)}</span>
+                  <span style="color:var(--text-muted); font-size:12px; font-weight: 500;">#${safe(i.instance_id)}</span>
+                </div>
+                <div class="pill-row" style="gap: 8px;">
+                  <span class="status ${statusClass}" style="padding: 4px 10px; font-size: 12px;">${statusText}</span>
+                  <button class="icon-btn" onclick="window.settingsActiveTab='${safe(i.app)}:${safe(i.instance_id)}'; setSection('settings'); loadSettings(); return false;" title="Configure Instance" style="padding: 5px 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.1)'; this.style.color='#fff';" onmouseout="this.style.background='rgba(255,255,255,0.05)'; this.style.color='var(--text-secondary)';">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                  </button>
+                  <button class="btn-mini" data-force-app="${safe(i.app)}" data-force-id="${safe(i.instance_id)}" ${disabledAttr} style="padding: 5px 14px;">FORCE</button>
+                </div>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 16px;">
+                <div>
+                  <div class="big-countdown ${due ? 'due' : ''}" data-next-sync="${safe(s.next_sync_time)}" style="margin:0 0 4px 0;">${cd}</div>
+                  <div class="subline mono" title="${safe(s.next_sync_time) || ''}" style="opacity: 0.8;">Next run (${safe(getTimeZoneLabel())}): ${fmtTime(s.next_sync_time) || '-'}</div>
+                  <div class="subline ${due ? 'warn' : ''}" style="margin-top:2px;">${note}</div>
+                </div>
+              </div>
+              <div style="margin-bottom: 20px;">
+                <div class="subline" style="display:flex; justify-content:space-between; gap:10px; font-weight:600;">
+                  <span>Rate window (${safe(i.rate_window_minutes)}m)</span>
+                  <span class="mono" style="color: var(--text-primary);">${used} / ${cap}</span>
+                </div>
+                <div class="progress" style="margin-top:8px; height: 6px; background: rgba(0,0,0,0.3);">
+                  <div class="${barClass}" style="width:${pct}%;"></div>
+                </div>
               </div>
             </div>
-            <div class="big-countdown ${due ? 'due' : ''}" data-next-sync="${safe(s.next_sync_time)}">${cd}</div>
-            <div class="subline mono" title="${safe(s.next_sync_time) || ''}">Next run (${safe(getTimeZoneLabel())}): ${fmtTime(s.next_sync_time) || '-'}</div>
-            <div class="subline ${due ? 'warn' : ''}">${note}</div>
-            <div style="margin-top:10px;">
-              <div class="subline" style="display:flex; justify-content:space-between; gap:10px;">
-                <span>Rate window (${safe(i.rate_window_minutes)}m)</span>
-                <span class="mono">${used} / ${cap}</span>
+            <div style="background: rgba(0,0,0,0.15); border-radius: 10px; padding: 14px; border: 1px solid rgba(255,255,255,0.03);">
+              <div class="kv" style="grid-template-columns: repeat(3, 1fr); gap: 12px;">
+                <div><div class="k">Wanted</div><div class="v" style="font-weight:600;">${safe(lrs.wanted_count ?? '-')}</div></div>
+                <div><div class="k">Triggered</div><div class="v" style="font-weight:600; color:var(--success-color);">${safe(lrs.actions_triggered ?? '-')}</div></div>
+                <div><div class="k">Interval</div><div class="v">${safe(i.interval_minutes)}m</div></div>
+                <div><div class="k">Retry</div><div class="v">${safe(i.item_retry_hours)}h</div></div>
+                <div><div class="k" style="white-space:nowrap;">Last Sync</div><div class="v mono" style="font-size:11px;">${fmtTime(s.last_sync_time) || '-'}</div></div>
+                <div><div class="k">Window</div><div class="v">${safe(i.rate_window_minutes)}m</div></div>
               </div>
-              <div class="progress" style="margin-top:6px;">
-                <div class="${barClass}" style="width:${pct}%;"></div>
-              </div>
-            </div>
-            <div class="kv">
-              <div><div class="k">Wanted (Last)</div><div class="v">${safe(lrs.wanted_count ?? '-')}</div></div>
-              <div><div class="k">Triggered (Last)</div><div class="v">${safe(lrs.actions_triggered ?? '-')}</div></div>
-              <div><div class="k">Interval</div><div class="v">${safe(i.interval_minutes)}m</div></div>
-              <div><div class="k">Retry</div><div class="v">${safe(i.item_retry_hours)}h</div></div>
-              <div><div class="k">Last Sync</div><div class="v mono">${fmtTime(s.last_sync_time) || '-'}</div></div>
-              <div><div class="k">Window</div><div class="v">${safe(i.rate_window_minutes)}m</div></div>
             </div>
           </div>
         `;
       }
 
-      // Search History: render one table per instance.
+      // Search History: Tabs + Pagination
       const runsWrap = document.getElementById('runs-wrap');
       const sh = data.search_history || {};
       const instances = data.config.instances || [];
-      runsWrap.innerHTML = '';
-      for (const inst of instances) {
+      if (!window.historyActiveTab && instances.length > 0) {
+        window.historyActiveTab = `${instances[0].app}:${instances[0].instance_id}`;
+      }
+      if (!window.historyPage) window.historyPage = {};
+      
+      const PAGE_SIZE = 10;
+      
+      let tabsHtml = '<div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">';
+      instances.forEach(inst => {
         const key = `${inst.app}:${inst.instance_id}`;
+        const isActive = (window.historyActiveTab === key);
+        const bg = isActive ? 'var(--accent-color)' : 'rgba(255,255,255,0.05)';
+        const color = isActive ? '#fff' : 'var(--text-secondary)';
+        const border = isActive ? 'transparent' : 'rgba(255,255,255,0.1)';
+        tabsHtml += `<button style="background:${bg}; color:${color}; border:1px solid ${border}; padding:8px 16px; font-size:13px; font-weight:600; border-radius:8px;" onclick="window.historyActiveTab='${key}'; window.historyPage['${key}']=1; refresh(); return false;">${safe(inst.app).toUpperCase()} - ${safe(inst.instance_name)}</button>`;
+      });
+      tabsHtml += '</div>';
+
+      let contentHtml = '';
+      const activeInst = instances.find(inst => `${inst.app}:${inst.instance_id}` === window.historyActiveTab);
+      if (activeInst) {
+        const key = window.historyActiveTab;
         const rows = sh[key] || [];
+        const totalRows = rows.length;
+        const totalPages = Math.ceil(totalRows / PAGE_SIZE) || 1;
+        let currentPage = window.historyPage[key] || 1;
+        if (currentPage > totalPages) currentPage = totalPages;
+        
+        const startIdx = (currentPage - 1) * PAGE_SIZE;
+        const pageRows = rows.slice(startIdx, startIdx + PAGE_SIZE);
+        
         let body = '';
-        for (const row of rows) {
+        for (const row of pageRows) {
           body += `<tr>
             <td class="mono time" title="${safe(row.occurred_at) || ''}">${fmtTime(row.occurred_at) || '-'}</td>
             <td class="title">${safe(row.title)}</td>
           </tr>`;
         }
         if (!body) {
-          body = `<tr><td colspan="2" class="mono" style="color: var(--text-muted);">No searches recorded yet.</td></tr>`;
+          body = `<tr><td colspan="2" class="mono" style="color: var(--text-muted); padding:16px;">No searches recorded yet.</td></tr>`;
         }
-        runsWrap.innerHTML += `
-          <div class="card" style="margin-top:12px;">
-            <h3>${safe(inst.app).toUpperCase()} - ${safe(inst.instance_name)} (#${safe(inst.instance_id)})</h3>
+
+        // Pagination controls
+        let paginationHtml = '';
+        if (totalPages > 1) {
+          paginationHtml = `<div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.05);">
+            <div style="font-size:12px; color:var(--text-muted);">Showing ${startIdx + 1} to ${Math.min(startIdx + PAGE_SIZE, totalRows)} of ${totalRows} entries</div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn-mini" style="padding:6px 12px; background:rgba(255,255,255,0.05); color:var(--text-primary); border-color:rgba(255,255,255,0.1);" ${currentPage === 1 ? 'disabled' : ''} onclick="window.historyPage['${key}']=${currentPage-1}; refresh(); return false;">Previous</button>
+              <div style="display:flex; align-items:center; font-size:13px; font-weight:600; padding:0 8px;">Page ${currentPage} of ${totalPages}</div>
+              <button class="btn-mini" style="padding:6px 12px; background:rgba(255,255,255,0.05); color:var(--text-primary); border-color:rgba(255,255,255,0.1);" ${currentPage === totalPages ? 'disabled' : ''} onclick="window.historyPage['${key}']=${currentPage+1}; refresh(); return false;">Next</button>
+            </div>
+          </div>`;
+        }
+
+        contentHtml = `
+          <div class="card" style="margin-top:0;">
             <div class="table-wrap">
               <table class="history">
                 <colgroup>
@@ -1648,8 +1747,10 @@ def create_app(config_path: str) -> Flask:
                 <tbody>${body}</tbody>
               </table>
             </div>
+            ${paginationHtml}
           </div>`;
       }
+      runsWrap.innerHTML = tabsHtml + contentHtml;
 
       const actionsEl = document.getElementById('recent-actions');
       const actions = Array.isArray(data.recent_actions)
@@ -1713,6 +1814,33 @@ def create_app(config_path: str) -> Flask:
     setSection('dashboard');
     ensureAuth();
 
+    if (!window.settingsActiveTab) window.settingsActiveTab = 'global';
+    window.updateSettingsTabs = function(instances) {
+      const tabsWrap = document.getElementById('settings-tabs');
+      if (!tabsWrap) return;
+      
+      const isGlobal = (window.settingsActiveTab === 'global');
+      const gBg = isGlobal ? 'var(--accent-color)' : 'rgba(255,255,255,0.05)';
+      const gColor = isGlobal ? '#fff' : 'var(--text-secondary)';
+      const gBorder = isGlobal ? 'transparent' : 'rgba(255,255,255,0.1)';
+      let html = `<button style="background:${gBg}; color:${gColor}; border:1px solid ${gBorder}; padding:8px 16px; font-size:13px; font-weight:600; border-radius:8px; cursor:pointer;" onclick="window.settingsActiveTab='global'; window.updateSettingsTabs(window.settingsInstances); return false;">Global Settings</button>`;
+
+      (instances || []).forEach(inst => {
+        const key = `${inst.app}:${inst.instance_id}`;
+        const isActive = (window.settingsActiveTab === key);
+        const bg = isActive ? 'var(--accent-color)' : 'rgba(255,255,255,0.05)';
+        const color = isActive ? '#fff' : 'var(--text-secondary)';
+        const border = isActive ? 'transparent' : 'rgba(255,255,255,0.1)';
+        html += `<button style="background:${bg}; color:${color}; border:1px solid ${border}; padding:8px 16px; font-size:13px; font-weight:600; border-radius:8px; cursor:pointer;" onclick="window.settingsActiveTab='${key}'; window.updateSettingsTabs(window.settingsInstances); return false;">${safe(inst.app).toUpperCase()} - ${safe(inst.instance_name)}</button>`;
+      });
+      tabsWrap.innerHTML = html;
+
+      document.querySelectorAll('.settings-tab-content').forEach(el => {
+        if (el.id === `settings-tab-${window.settingsActiveTab}`) el.style.display = 'block';
+        else el.style.display = 'none';
+      });
+    };
+
     async function loadSettings() {
       populateTimezoneOptions();
       const r = await apiFetch('/api/settings', { cache:'no-store' });
@@ -1722,144 +1850,179 @@ def create_app(config_path: str) -> Flask:
 
       const wrap = document.getElementById('settings-instance-cards');
       wrap.innerHTML = '';
-      for (const inst of (data.instances || [])) {
+      window.settingsInstances = data.instances || [];
+      for (const inst of window.settingsInstances) {
         const key = `${inst.app}:${inst.instance_id}`;
         const mode = String(inst.sonarr_missing_mode || 'smart').toLowerCase();
         const upgradeScopeRaw = String(inst.upgrade_scope || 'wanted').toLowerCase();
         const upgradeScope = (upgradeScopeRaw === 'all_monitored') ? 'both' : upgradeScopeRaw;
         const order = String(inst.search_order || 'smart').toLowerCase();
         const orderUi = `
-            <div class="field" style="margin-top:10px;">
-              <div class="label">Search Order</div>
-              <select class="cfg si_search_order">
-                <option value="smart" ${order === 'smart' ? 'selected' : ''}>Smart (Recent, Random, Oldest)</option>
-                <option value="newest" ${order === 'newest' ? 'selected' : ''}>Newest First</option>
-                <option value="random" ${order === 'random' ? 'selected' : ''}>Random</option>
-                <option value="oldest" ${order === 'oldest' ? 'selected' : ''}>Oldest First</option>
-              </select>
-            </div>
+              <div class="field">
+                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Search Order</div>
+                <select class="cfg si_search_order" style="width:100%; min-height:40px; display:block; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; font-family:inherit; outline:none; box-sizing:border-box;">
+                  <option value="smart" ${order === 'smart' ? 'selected' : ''}>Smart (Recent, Random, Oldest)</option>
+                  <option value="newest" ${order === 'newest' ? 'selected' : ''}>Newest First</option>
+                  <option value="random" ${order === 'random' ? 'selected' : ''}>Random</option>
+                  <option value="oldest" ${order === 'oldest' ? 'selected' : ''}>Oldest First</option>
+                </select>
+              </div>
         `;
         const behaviorUi = `
-            <div class="two-col" style="margin-top:10px;">
+            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:20px; align-items:end; margin-bottom:20px;">
               <div class="field">
-                <div class="label">Quiet Start (HH:MM)</div>
-                <input class="cfg mono si_quiet_start" type="text" value="${safe(inst.quiet_hours_start)}" placeholder="23:00"/>
+                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">
+                  Quiet Start (HH:MM)
+                  <span class="info-icon" title="Searches will pause during quiet hours. Force runs bypass these hours."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <input class="cfg mono si_quiet_start" type="text" value="${safe(inst.quiet_hours_start)}" placeholder="23:00" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
               </div>
               <div class="field">
-                <div class="label">Quiet End (HH:MM)</div>
-                <input class="cfg mono si_quiet_end" type="text" value="${safe(inst.quiet_hours_end)}" placeholder="06:00"/>
+                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">
+                  Quiet End (HH:MM)
+                  <span class="info-icon" title="Searches resume after this time. Force runs bypass these hours."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <input class="cfg mono si_quiet_end" type="text" value="${safe(inst.quiet_hours_end)}" placeholder="06:00" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+              </div>
+              <div class="field">
+                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">
+                  Hours After Release
+                  <span class="info-icon" title="Minimum hours after a title's release date before Seekarr will search for it."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <input class="cfg si_after_release" type="number" min="0" value="${safe(inst.min_hours_after_release)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+              </div>
+              <div class="field">
+                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">
+                  Seconds Between
+                  <span class="info-icon" title="Minimum delay in seconds between consecutive search actions to avoid hammering the indexer."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <input class="cfg si_between" type="number" min="0" value="${safe(inst.min_seconds_between_actions)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+              </div>
+              <div class="field">
+                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">
+                  Upgrade Source
+                  <span class="info-icon" title="Wanted List = Arr's cutoff-unmet upgrade list. Monitored Items = Any monitored item that has files. Both = Combines both sources."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <select class="cfg si_upgrade_scope" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; font-family:inherit; outline:none;">
+                  <option value="wanted" ${upgradeScope === 'wanted' ? 'selected' : ''}>Wanted List</option>
+                  <option value="monitored" ${upgradeScope === 'monitored' ? 'selected' : ''}>Monitored Items</option>
+                  <option value="both" ${upgradeScope === 'both' ? 'selected' : ''}>Both Sources</option>
+                </select>
               </div>
             </div>
-            <div class="subline" style="margin-top:8px;">Force runs bypass quiet hours.</div>
-            <div class="two-col" style="margin-top:10px;">
+        `;
+        const limitsUi = `
+            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:20px; align-items:end;">
               <div class="field">
-                <div class="label">Hours After Release</div>
-                <input class="cfg si_after_release" type="number" min="0" value="${safe(inst.min_hours_after_release)}"/>
+                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Interval (min)</div>
+                <input class="cfg si_interval" type="number" min="1" value="${safe(inst.interval_minutes)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
               </div>
               <div class="field">
-                <div class="label">Seconds Between Actions</div>
-                <input class="cfg si_between" type="number" min="0" value="${safe(inst.min_seconds_between_actions)}"/>
-              </div>
-            </div>
-            <div class="two-col" style="margin-top:10px;">
-              <div class="field">
-                <div class="label">Missing Per Run</div>
-                <input class="cfg si_missing_per_run" type="number" min="0" value="${safe(inst.max_missing_actions_per_instance_per_sync)}"/>
+                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Retry (hours)</div>
+                <input class="cfg si_retry" type="number" min="1" value="${safe(inst.item_retry_hours)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
               </div>
               <div class="field">
-                <div class="label">Upgrades Per Run</div>
-                <input class="cfg si_upgrades_per_run" type="number" min="0" value="${safe(inst.max_cutoff_actions_per_instance_per_sync)}"/>
+                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Rate Window (min)</div>
+                <input class="cfg si_rate_window" type="number" min="1" value="${safe(inst.rate_window_minutes)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
               </div>
-            </div>
-            <div class="field" style="margin-top:10px;">
-              <div class="label">Upgrade Source</div>
-              <select class="cfg si_upgrade_scope">
-                <option value="wanted" ${upgradeScope === 'wanted' ? 'selected' : ''}>Wanted List Only</option>
-                <option value="monitored" ${upgradeScope === 'monitored' ? 'selected' : ''}>Monitored Items Only</option>
-                <option value="both" ${upgradeScope === 'both' ? 'selected' : ''}>Both</option>
-              </select>
-              <div class="subline" style="margin-top:6px;">
-                Wanted List Only = Arr's upgrade list. Monitored Items Only = monitored items with files. Both = both sources together.
+              <div class="field">
+                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Rate Cap</div>
+                <input class="cfg si_rate_cap" type="number" min="1" value="${safe(inst.rate_cap)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+              </div>
+              <div class="field">
+                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Missing Per Run</div>
+                <input class="cfg si_missing_per_run" type="number" min="0" value="${safe(inst.max_missing_actions_per_instance_per_sync)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+              </div>
+              <div class="field">
+                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Upgrades Per Run</div>
+                <input class="cfg si_upgrades_per_run" type="number" min="0" value="${safe(inst.max_cutoff_actions_per_instance_per_sync)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
               </div>
             </div>
         `;
         const modeUi = (inst.app === 'sonarr') ? `
-            <div class="field" style="margin-top:10px;">
-              <div class="label">Missing Mode</div>
-              <select class="cfg si_missing_mode">
-                <option value="smart" ${mode === 'smart' ? 'selected' : ''}>Smart</option>
-                <option value="season_packs" ${mode === 'season_packs' ? 'selected' : ''}>Season Packs</option>
-                <option value="shows" ${mode === 'shows' ? 'selected' : ''}>Show Batch</option>
-                <option value="episodes" ${mode === 'episodes' ? 'selected' : ''}>Episode</option>
-              </select>
-              <div class="subline" style="margin-top:6px;">
-                Season Packs = <span class="mono">SeasonSearch</span>. Show Batch = <span class="mono">EpisodeSearch</span> for all missing episodes in a show.
+              <div class="field" style="margin-top:20px;">
+                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">
+                  Missing Mode
+                  <span class="info-icon" title="Smart = auto-selects best mode. Season Packs = uses SeasonSearch API. Show Batch = EpisodeSearch for all missing eps in a show. Episode = per-episode search."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <select class="cfg si_missing_mode" style="width:100%; min-height:40px; display:block; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; font-family:inherit; outline:none; box-sizing:border-box;">
+                  <option value="smart" ${mode === 'smart' ? 'selected' : ''}>Smart</option>
+                  <option value="season_packs" ${mode === 'season_packs' ? 'selected' : ''}>Season Packs</option>
+                  <option value="shows" ${mode === 'shows' ? 'selected' : ''}>Show Batch</option>
+                  <option value="episodes" ${mode === 'episodes' ? 'selected' : ''}>Episode</option>
+                </select>
               </div>
-            </div>
         ` : '';
         wrap.innerHTML += `
-          <div class="instance-card" data-app="${safe(inst.app)}" data-key="${safe(key)}" style="padding:14px;">
-            <div class="instance-head" style="align-items:flex-start;">
+          <div class="card settings-tab-content" id="settings-tab-${safe(key)}" data-app="${safe(inst.app)}" data-key="${safe(key)}" style="padding:24px; display:none; margin-top:0;">
+            <div class="instance-head" style="align-items:flex-start; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:20px; margin-bottom:24px;">
               <div>
-                <div class="instance-title">${safe(inst.app).toUpperCase()} - ${safe(inst.instance_name)} (#${safe(inst.instance_id)})</div>
-                <div class="subline mono" style="margin-top:4px;">${safe(inst.arr_url) || '-'}</div>
+                <div class="instance-title" style="font-size:18px; display:flex; gap:10px; align-items:center;">
+                  <svg width="22" height="22" fill="none" stroke="var(--accent-color)" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                  ${safe(inst.app).toUpperCase()} - ${safe(inst.instance_name)} 
+                  <span style="color:var(--text-muted); font-size:13px; font-weight:500;">#${safe(inst.instance_id)}</span>
+                </div>
+                <div class="subline mono" style="margin-top:8px; opacity:0.8;">${safe(inst.arr_url) || '-'}</div>
               </div>
-              <div class="pill-row">
-                <label class="tog subline"><input type="checkbox" class="si_enabled" ${inst.enabled ? 'checked' : ''}> Enabled</label>
-                <label class="tog subline"><input type="checkbox" class="si_missing" ${inst.search_missing ? 'checked' : ''}> Missing</label>
-                <label class="tog subline"><input type="checkbox" class="si_cutoff" ${inst.search_cutoff_unmet ? 'checked' : ''}> Upgrades</label>
-              </div>
-            </div>
-
-            <div class="two-col" style="margin-top:10px;">
-              <div class="field">
-                <div class="label">Interval (min)</div>
-                <input class="cfg si_interval" type="number" min="1" value="${safe(inst.interval_minutes)}"/>
-              </div>
-              <div class="field">
-                <div class="label">Retry (hours)</div>
-                <input class="cfg si_retry" type="number" min="1" value="${safe(inst.item_retry_hours)}"/>
+              <div class="pill-row" style="gap:20px; background:rgba(0,0,0,0.4); padding:10px 16px; border-radius:10px; border:1px solid rgba(255,255,255,0.05);">
+                <label class="tog subline" style="cursor:pointer; font-weight:600; font-size:14px; color:var(--text-primary); display:flex; align-items:center; gap:8px;"><input type="checkbox" class="si_enabled" ${inst.enabled ? 'checked' : ''} style="width:18px; height:18px; accent-color:var(--accent-color);"> Enabled</label>
+                <label class="tog subline" style="cursor:pointer; font-weight:600; font-size:14px; color:var(--text-primary); display:flex; align-items:center; gap:8px;"><input type="checkbox" class="si_missing" ${inst.search_missing ? 'checked' : ''} style="width:18px; height:18px; accent-color:var(--accent-color);"> Missing</label>
+                <label class="tog subline" style="cursor:pointer; font-weight:600; font-size:14px; color:var(--text-primary); display:flex; align-items:center; gap:8px;"><input type="checkbox" class="si_cutoff" ${inst.search_cutoff_unmet ? 'checked' : ''} style="width:18px; height:18px; accent-color:var(--accent-color);"> Upgrades</label>
               </div>
             </div>
 
-            <div class="two-col" style="margin-top:10px;">
-              <div class="field">
-                <div class="label">Rate Window (min)</div>
-                <input class="cfg si_rate_window" type="number" min="1" value="${safe(inst.rate_window_minutes)}"/>
-              </div>
-              <div class="field">
-                <div class="label">Rate Cap</div>
-                <input class="cfg si_rate_cap" type="number" min="1" value="${safe(inst.rate_cap)}"/>
+            <!-- Connection Settings -->
+            <div style="background:rgba(255,255,255,0.015); border:1px solid rgba(255,255,255,0.05); border-radius:12px; padding:20px; margin-bottom:24px;">
+              <h4 style="margin:0 0 16px 0; color:var(--text-primary); font-size:16px; letter-spacing:0.02em; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:10px;">Connection Details</h4>
+              <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:20px; align-items:end;">
+                <div class="field">
+                  <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Arr URL</div>
+                  <input class="cfg mono si_url" type="text" value="${safe(inst.arr_url)}" style="width:100%; min-height:40px; display:block; padding:8px 12px; box-sizing:border-box; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                </div>
+                <div class="field">
+                  <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">
+                    API Key
+                    <span class="info-icon" title="Enter a new key to update it. Leave blank to keep the existing key unchanged."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                  </div>
+                  <div class="inline-input" style="display:flex; gap:10px; width:100%;">
+                    <input class="cfg mono si_apikey" type="password" value="" placeholder="${inst.api_key_set ? '********' : '(not set)'}" style="flex:1; width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                    <button class="icon-btn danger" type="button" title="Delete stored API key" style="height:40px; width:40px; padding:0; display:flex; align-items:center; justify-content:center; background:rgba(239,68,68,0.1); color:#ef4444; border:1px solid rgba(239,68,68,0.2); border-radius:8px; cursor:pointer; flex-shrink:0;"
+                            data-clear-key="1" data-app="${safe(inst.app)}" data-id="${safe(inst.instance_id)}" ${inst.api_key_set ? '' : 'disabled'}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+                        <path d="M3 6h18"></path>
+                        <path d="M8 6V4h8v2"></path>
+                        <path d="M6 6l1 16h10l1-16"></path>
+                        <path d="M10 11v6"></path>
+                        <path d="M14 11v6"></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div class="field" style="margin-top:10px;">
-              <div class="label">Arr URL</div>
-              <input class="cfg mono si_url" type="text" value="${safe(inst.arr_url)}"/>
+            <!-- Limits & Intervals -->
+            <div style="background:rgba(255,255,255,0.015); border:1px solid rgba(255,255,255,0.05); border-radius:12px; padding:20px; margin-bottom:24px;">
+              <h4 style="margin:0 0 16px 0; color:var(--text-primary); font-size:16px; letter-spacing:0.02em; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:10px;">Limits & Intervals</h4>
+              ${limitsUi}
             </div>
-            <div class="field" style="margin-top:10px;">
-              <div class="label">API Key</div>
-              <div class="inline-input">
-                <input class="cfg mono si_apikey" type="password" value="" placeholder="${inst.api_key_set ? '********' : '(not set)'}"/>
-                <button class="icon-btn danger" type="button" title="Delete stored API key" aria-label="Delete stored API key"
-                        data-clear-key="1" data-app="${safe(inst.app)}" data-id="${safe(inst.instance_id)}" ${inst.api_key_set ? '' : 'disabled'}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M3 6h18"></path>
-                    <path d="M8 6V4h8v2"></path>
-                    <path d="M6 6l1 16h10l1-16"></path>
-                    <path d="M10 11v6"></path>
-                    <path d="M14 11v6"></path>
-                  </svg>
-                </button>
+
+            <!-- Search Behavior -->
+            <div style="background:rgba(255,255,255,0.015); border:1px solid rgba(255,255,255,0.05); border-radius:12px; padding:20px; margin-bottom:24px;">
+              <h4 style="margin:0 0 16px 0; color:var(--text-primary); font-size:16px; letter-spacing:0.02em; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:10px;">Search Behavior</h4>
+              ${behaviorUi}
+              <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:20px; align-items:end;">
+                ${orderUi}
+                ${modeUi}
               </div>
-              <div class="subline" style="margin-top:6px;">Leave blank to keep unchanged.</div>
             </div>
-            ${orderUi}
-            ${behaviorUi}
-            ${modeUi}
+
           </div>
         `;
+
+
       }
+      window.updateSettingsTabs(window.settingsInstances);
     }
 
     async function saveSettings() {

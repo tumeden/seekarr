@@ -3,10 +3,11 @@ FROM python:3.11-slim
 ARG SEEKARR_VERSION=dev
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    SEEKARR_VERSION=${SEEKARR_VERSION}
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
+
+RUN echo "${SEEKARR_VERSION}" > version.txt
 
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt

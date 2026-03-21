@@ -289,7 +289,17 @@ def create_app(config_path: str) -> Flask:
         "active_instance_id": None,
         "active_instance_name": None,
     }
-    current_version = str(os.getenv("SEEKARR_VERSION", "") or "").strip() or "dev"
+    current_version = "dev"
+    try:
+        with open(Path(__file__).resolve().parent.parent / "version.txt", "r", encoding="utf-8") as f:
+            v_text = f.read().strip()
+            if v_text:
+                current_version = v_text
+    except Exception:
+        pass
+
+    if current_version == "dev":
+        current_version = str(os.getenv("SEEKARR_VERSION", "") or "").strip() or "dev"
     version_lock = threading.Lock()
     version_state: dict[str, Any] = {
         "current": current_version,

@@ -202,3 +202,63 @@ radarr:
 
     cfg = load_config(str(cfg_path))
     assert cfg.app.quiet_hours_timezone == "America/New_York"
+
+
+def test_explicit_empty_instance_lists_do_not_create_legacy_defaults(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        """
+app:
+  db_path: "./state/seekarr.db"
+  request_timeout_seconds: 30
+  verify_ssl: true
+  log_level: INFO
+
+radarr:
+  instances: []
+sonarr:
+  instances: []
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+    assert cfg.radarr_instances == []
+    assert cfg.sonarr_instances == []
+
+
+def test_legacy_movie_hunt_and_tv_hunt_sections_are_ignored(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        """
+app:
+  db_path: "./state/seekarr.db"
+  request_timeout_seconds: 30
+  verify_ssl: true
+  log_level: INFO
+
+movie_hunt:
+  instances:
+    - instance_id: 1
+      instance_name: Legacy Movie Hunt
+      enabled: true
+      interval_minutes: 15
+      radarr:
+        url: http://localhost:7878
+        api_key: "abc"
+tv_hunt:
+  instances:
+    - instance_id: 1
+      instance_name: Legacy TV Hunt
+      enabled: true
+      interval_minutes: 15
+      sonarr:
+        url: http://localhost:8989
+        api_key: "def"
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+    assert cfg.radarr_instances == []
+    assert cfg.sonarr_instances == []

@@ -113,6 +113,7 @@ class StateStore:
                 CREATE TABLE IF NOT EXISTS ui_instance_settings (
                     app_type TEXT NOT NULL,
                     instance_id INTEGER NOT NULL,
+                    instance_name TEXT,
                     enabled INTEGER,
                     interval_minutes INTEGER,
                     search_missing INTEGER,
@@ -136,6 +137,8 @@ class StateStore:
                 """
             )
             cols = {str(row["name"]).strip().lower() for row in conn.execute("PRAGMA table_info(ui_instance_settings)")}
+            if "instance_name" not in cols:
+                conn.execute("ALTER TABLE ui_instance_settings ADD COLUMN instance_name TEXT")
             if "upgrade_scope" not in cols:
                 conn.execute("ALTER TABLE ui_instance_settings ADD COLUMN upgrade_scope TEXT")
 
@@ -239,6 +242,24 @@ class StateStore:
                 (str(app_type), int(instance_id)),
             )
 
+    def delete_instance(self, app_type: str, instance_id: int) -> None:
+        app = str(app_type).strip().lower()
+        iid = int(instance_id)
+        if app not in ("radarr", "sonarr"):
+            raise ValueError("Invalid app_type")
+        with self._connect() as conn:
+            conn.execute("DELETE FROM ui_instance_settings WHERE app_type = ? AND instance_id = ?", (app, iid))
+            conn.execute("DELETE FROM arr_credentials WHERE app_type = ? AND instance_id = ?", (app, iid))
+            for table in (
+                "processed_guid",
+                "item_action",
+                "sync_status",
+                "search_event",
+                "search_action",
+                "instance_run",
+            ):
+                conn.execute(f"DELETE FROM {table} WHERE hunt_type = ? AND instance_id = ?", (app, iid))
+
     def get_ui_app_settings(self) -> dict[str, Any]:
         with self._connect() as conn:
             row = conn.execute("SELECT quiet_hours_timezone FROM ui_app_settings WHERE id = 1").fetchone()
@@ -270,14 +291,15 @@ class StateStore:
                 """
                 INSERT INTO ui_instance_settings(
                     app_type, instance_id,
-                    enabled, interval_minutes, search_missing, search_cutoff_unmet, upgrade_scope, search_order,
+                    instance_name, enabled, interval_minutes, search_missing, search_cutoff_unmet, upgrade_scope, search_order,
                     quiet_hours_start, quiet_hours_end,
                     min_hours_after_release, min_seconds_between_actions,
                     max_missing_actions_per_instance_per_sync, max_cutoff_actions_per_instance_per_sync,
                     sonarr_missing_mode, item_retry_hours, rate_window_minutes, rate_cap, arr_url, updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(app_type, instance_id) DO UPDATE SET
+                    instance_name=excluded.instance_name,
                     enabled=excluded.enabled,
                     interval_minutes=excluded.interval_minutes,
                     search_missing=excluded.search_missing,
@@ -300,6 +322,7 @@ class StateStore:
                 (
                     str(app_type).strip().lower(),
                     iid,
+                    values.get("instance_name"),
                     values.get("enabled"),
                     values.get("interval_minutes"),
                     values.get("search_missing"),
@@ -327,6 +350,7 @@ class StateStore:
                 """
                 SELECT
                     app_type, instance_id,
+                    instance_name,
                     enabled, interval_minutes, search_missing, search_cutoff_unmet, upgrade_scope, search_order,
                     quiet_hours_start, quiet_hours_end,
                     min_hours_after_release, min_seconds_between_actions,
@@ -343,6 +367,7 @@ class StateStore:
             except (TypeError, ValueError):
                 continue
             out[(app_type, instance_id)] = {
+                "instance_name": row["instance_name"],
                 "enabled": row["enabled"],
                 "interval_minutes": row["interval_minutes"],
                 "search_missing": row["search_missing"],

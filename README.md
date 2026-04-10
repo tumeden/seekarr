@@ -65,7 +65,7 @@ Then:
 1. Start container.
 2. Open `http://localhost:8788`.
 3. Set Web UI password.
-4. Configure Radarr/Sonarr instances and settings in **Settings**.
+4. Configure Radarr/Sonarr instances and settings in **Settings**. You can add or remove multiple instances for either app from the UI.
 
 ---
 
@@ -75,7 +75,7 @@ Persist `./data`.
 
 It contains:
 
-- `config.yaml` (base startup config; auto-created if missing)
+- `config.yaml` (startup/bootstrap defaults; optional import source for `radarr` and `sonarr` instance definitions)
 - `seekarr.db` (state + Web UI settings)
 - `seekarr.masterkey` (key used to decrypt stored Arr API keys)
 

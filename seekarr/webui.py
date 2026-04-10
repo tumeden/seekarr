@@ -19,7 +19,7 @@ from typing import Any
 from flask import Flask, jsonify, request, send_file
 
 from .arr import ArrRequestError
-from .config import RuntimeConfig, load_config
+from .config import ArrConfig, ArrSyncInstanceConfig, RuntimeConfig, load_config
 from .engine import Engine, _quiet_hours_end_utc
 from .logging_utils import setup_logging
 from .state import StateStore
@@ -33,6 +33,35 @@ class _QuietAccessFilter(logging.Filter):
             '"GET /favicon.ico ',
         ]
         return not any(path in msg for path in noisy_paths)
+
+
+def _default_instance_name(app_type: str, instance_id: int) -> str:
+    app = str(app_type or "").strip().lower()
+    label = "Radarr" if app == "radarr" else "Sonarr" if app == "sonarr" else (app.title() or "Instance")
+    return f"{label} {max(1, int(instance_id))}"
+
+
+def _normalize_upgrade_scope(value: Any) -> str:
+    scope = str(value or "").strip().lower()
+    if scope in ("both", "all", "all_monitored", "full_library"):
+        return "both"
+    if scope in ("monitored", "library", "monitored_only"):
+        return "monitored"
+    return "wanted"
+
+
+def _normalize_search_order(value: Any) -> str:
+    order = str(value or "").strip().lower()
+    if order in ("smart", "newest", "random", "oldest"):
+        return order
+    return "smart"
+
+
+def _normalize_sonarr_missing_mode(value: Any) -> str:
+    mode = str(value or "").strip().lower()
+    if mode in ("smart", "season_packs", "shows", "episodes"):
+        return mode
+    return "smart"
 
 
 def _config_view(config: RuntimeConfig, store: StateStore) -> dict[str, Any]:
@@ -79,9 +108,9 @@ def _config_view(config: RuntimeConfig, store: StateStore) -> dict[str, Any]:
         }
 
     rows = []
-    for inst in config.radarr_instances:
+    for inst in sorted(config.radarr_instances, key=lambda item: int(item.instance_id)):
         rows.append(_instance_row("radarr", inst))
-    for inst in config.sonarr_instances:
+    for inst in sorted(config.sonarr_instances, key=lambda item: int(item.instance_id)):
         rows.append(_instance_row("sonarr", inst))
     return {
         "app": {
@@ -142,6 +171,131 @@ def create_app(config_path: str) -> Flask:
     wz.addFilter(_QuietAccessFilter())
     store = StateStore(base_config.app.db_path)
 
+    def _find_base_instance(cfg: RuntimeConfig, app_type: str, instance_id: int) -> ArrSyncInstanceConfig | None:
+        instances = cfg.radarr_instances if app_type == "radarr" else cfg.sonarr_instances
+        for inst in instances:
+            if int(inst.instance_id) == int(instance_id):
+                return inst
+        return None
+
+    def _materialize_db_instance(
+        cfg: RuntimeConfig,
+        app_type: str,
+        instance_id: int,
+        row: dict[str, Any],
+        base_inst: ArrSyncInstanceConfig | None = None,
+    ) -> ArrSyncInstanceConfig:
+        def _to_bool(value: Any, fallback: bool) -> bool:
+            if value is None:
+                return fallback
+            try:
+                return bool(int(value))
+            except (TypeError, ValueError):
+                return bool(value)
+
+        def _to_int(value: Any, fallback: int) -> int:
+            if value is None:
+                return fallback
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return fallback
+
+        base_arr = base_inst.arr if base_inst is not None else ArrConfig(enabled=True, url="", api_key="")
+        enabled = _to_bool(row.get("enabled"), base_inst.enabled if base_inst is not None else True)
+        interval_minutes = max(
+            15, min(60, _to_int(row.get("interval_minutes"), base_inst.interval_minutes if base_inst else 15))
+        )
+        instance_name = str(row.get("instance_name") or (base_inst.instance_name if base_inst else "")).strip()
+        return ArrSyncInstanceConfig(
+            instance_id=max(1, int(instance_id)),
+            instance_name=instance_name or _default_instance_name(app_type, instance_id),
+            enabled=enabled,
+            interval_minutes=interval_minutes,
+            search_missing=_to_bool(row.get("search_missing"), base_inst.search_missing if base_inst else True),
+            search_cutoff_unmet=_to_bool(
+                row.get("search_cutoff_unmet"), base_inst.search_cutoff_unmet if base_inst else True
+            ),
+            upgrade_scope=_normalize_upgrade_scope(
+                row.get("upgrade_scope")
+                if row.get("upgrade_scope") is not None
+                else (base_inst.upgrade_scope if base_inst else "wanted")
+            ),
+            search_order=_normalize_search_order(
+                row.get("search_order")
+                if row.get("search_order") is not None
+                else (base_inst.search_order if base_inst else "smart")
+            ),
+            quiet_hours_start=str(
+                row.get("quiet_hours_start")
+                if row.get("quiet_hours_start") is not None
+                else (
+                    base_inst.quiet_hours_start
+                    if base_inst and base_inst.quiet_hours_start is not None
+                    else cfg.app.quiet_hours_start
+                )
+            ).strip(),
+            quiet_hours_end=str(
+                row.get("quiet_hours_end")
+                if row.get("quiet_hours_end") is not None
+                else (
+                    base_inst.quiet_hours_end
+                    if base_inst and base_inst.quiet_hours_end is not None
+                    else cfg.app.quiet_hours_end
+                )
+            ).strip(),
+            min_hours_after_release=_to_int(
+                row.get("min_hours_after_release"),
+                base_inst.min_hours_after_release
+                if base_inst and base_inst.min_hours_after_release is not None
+                else cfg.app.min_hours_after_release,
+            ),
+            min_seconds_between_actions=_to_int(
+                row.get("min_seconds_between_actions"),
+                base_inst.min_seconds_between_actions
+                if base_inst and base_inst.min_seconds_between_actions is not None
+                else cfg.app.min_seconds_between_actions,
+            ),
+            max_missing_actions_per_instance_per_sync=_to_int(
+                row.get("max_missing_actions_per_instance_per_sync"),
+                base_inst.max_missing_actions_per_instance_per_sync
+                if base_inst and base_inst.max_missing_actions_per_instance_per_sync is not None
+                else cfg.app.max_missing_actions_per_instance_per_sync,
+            ),
+            max_cutoff_actions_per_instance_per_sync=_to_int(
+                row.get("max_cutoff_actions_per_instance_per_sync"),
+                base_inst.max_cutoff_actions_per_instance_per_sync
+                if base_inst and base_inst.max_cutoff_actions_per_instance_per_sync is not None
+                else cfg.app.max_cutoff_actions_per_instance_per_sync,
+            ),
+            sonarr_missing_mode=_normalize_sonarr_missing_mode(
+                row.get("sonarr_missing_mode")
+                if row.get("sonarr_missing_mode") is not None
+                else (base_inst.sonarr_missing_mode if base_inst else "smart")
+            ),
+            item_retry_hours=_to_int(
+                row.get("item_retry_hours"),
+                base_inst.item_retry_hours
+                if base_inst and base_inst.item_retry_hours is not None
+                else cfg.app.item_retry_hours,
+            ),
+            rate_window_minutes=_to_int(
+                row.get("rate_window_minutes"),
+                base_inst.rate_window_minutes
+                if base_inst and base_inst.rate_window_minutes is not None
+                else cfg.app.rate_window_minutes,
+            ),
+            rate_cap=_to_int(
+                row.get("rate_cap"),
+                base_inst.rate_cap if base_inst and base_inst.rate_cap is not None else cfg.app.rate_cap_per_instance,
+            ),
+            arr=ArrConfig(
+                enabled=enabled,
+                url=str(row.get("arr_url") or base_arr.url or "").strip(),
+                api_key=str(base_arr.api_key or "").strip(),
+            ),
+        )
+
     def _bootstrap_ui_settings_from_yaml(cfg: RuntimeConfig) -> None:
         """
         One-time migration path:
@@ -160,6 +314,9 @@ def create_app(config_path: str) -> Flask:
                     app_type,
                     int(inst.instance_id),
                     {
+                        "instance_name": str(
+                            inst.instance_name or _default_instance_name(app_type, int(inst.instance_id))
+                        ).strip(),
                         "enabled": 1 if bool(inst.enabled) else 0,
                         "interval_minutes": int(inst.interval_minutes),
                         "search_missing": 1 if bool(inst.search_missing) else 0,
@@ -211,59 +368,24 @@ def create_app(config_path: str) -> Flask:
         app_cfg = replace(cfg.app, quiet_hours_timezone=qtz or cfg.app.quiet_hours_timezone)
 
         raw_overrides = store.get_all_ui_instance_settings()
-
-        def _to_bool(value: Any) -> bool | None:
-            if value is None:
-                return None
-            try:
-                return bool(int(value))
-            except (TypeError, ValueError):
-                return bool(value)
-
-        def _to_int(value: Any) -> int | None:
-            if value is None:
-                return None
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                return None
-
-        def _apply_instance(app_type: str, inst: Any) -> Any:
-            ov = raw_overrides.get((app_type, int(inst.instance_id)))
-            if not ov:
-                return inst
-            updates: dict[str, Any] = {}
-
-            for f in ("enabled", "search_missing", "search_cutoff_unmet"):
-                b = _to_bool(ov.get(f))
-                if b is not None:
-                    updates[f] = b
-            for f in (
-                "interval_minutes",
-                "min_hours_after_release",
-                "min_seconds_between_actions",
-                "max_missing_actions_per_instance_per_sync",
-                "max_cutoff_actions_per_instance_per_sync",
-                "item_retry_hours",
-                "rate_window_minutes",
-                "rate_cap",
-            ):
-                iv = _to_int(ov.get(f))
-                if iv is not None:
-                    updates[f] = iv
-            for f in ("upgrade_scope", "search_order", "quiet_hours_start", "quiet_hours_end", "sonarr_missing_mode"):
-                v = ov.get(f)
-                if v is not None:
-                    updates[f] = str(v).strip()
-
-            arr_url = ov.get("arr_url")
-            if arr_url is not None and str(arr_url).strip():
-                updates["arr"] = replace(inst.arr, url=str(arr_url).strip())
-
-            return replace(inst, **updates) if updates else inst
-
-        radarr_instances = [_apply_instance("radarr", inst) for inst in cfg.radarr_instances]
-        sonarr_instances = [_apply_instance("sonarr", inst) for inst in cfg.sonarr_instances]
+        if raw_overrides:
+            radarr_instances = [
+                _materialize_db_instance(
+                    cfg, "radarr", instance_id, row, _find_base_instance(cfg, "radarr", instance_id)
+                )
+                for (app_type, instance_id), row in sorted(raw_overrides.items())
+                if app_type == "radarr"
+            ]
+            sonarr_instances = [
+                _materialize_db_instance(
+                    cfg, "sonarr", instance_id, row, _find_base_instance(cfg, "sonarr", instance_id)
+                )
+                for (app_type, instance_id), row in sorted(raw_overrides.items())
+                if app_type == "sonarr"
+            ]
+        else:
+            radarr_instances = list(cfg.radarr_instances)
+            sonarr_instances = list(cfg.sonarr_instances)
         return replace(cfg, app=app_cfg, radarr_instances=radarr_instances, sonarr_instances=sonarr_instances)
 
     config = _with_ui_overrides(base_config)
@@ -271,6 +393,7 @@ def create_app(config_path: str) -> Flask:
     config_lock = threading.Lock()
     run_lock = threading.Lock()
     run_state_lock = threading.Lock()
+    autorun_threads_started: set[tuple[str, int]] = set()
     run_state: dict[str, Any] = {
         "running": False,
         "force": False,
@@ -417,6 +540,26 @@ def create_app(config_path: str) -> Flask:
         store.clear_arr_api_key(app_type, instance_id)
         return jsonify({"ok": True})
 
+    @app.post("/api/instances/delete")
+    def delete_instance() -> Any:
+        payload = request.get_json(silent=True) or {}
+        app_type = str(payload.get("app") or "").strip().lower()
+        confirm_password = str(payload.get("confirm_password") or "")
+        try:
+            instance_id = int(payload.get("instance_id") or 0)
+        except (TypeError, ValueError):
+            instance_id = 0
+        if app_type not in ("radarr", "sonarr") or instance_id <= 0:
+            return jsonify({"error": "Invalid instance"}), 400
+        if not password_hash or not _verify_password(confirm_password, password_hash):
+            return jsonify({"error": "Password confirmation failed"}), 403
+        try:
+            store.delete_instance(app_type, instance_id)
+            _reload_config()
+            return jsonify({"ok": True})
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 400
+
     def _get_config() -> RuntimeConfig:
         with config_lock:
             return config
@@ -430,6 +573,7 @@ def create_app(config_path: str) -> Flask:
         with config_lock:
             config = new_config
             engine.config = new_config
+        _ensure_autorun_threads(new_config)
 
     def _progress_cb(evt: dict[str, Any]) -> None:
         with run_state_lock:
@@ -598,20 +742,21 @@ def create_app(config_path: str) -> Flask:
                     logger.error("Autorun loop error (%s:%s): %s", app_type, instance_id, exc)
                 time.sleep(5.0)
 
-    for inst in config.radarr_instances:
-        threading.Thread(
-            target=_autorun_instance_loop,
-            args=("radarr", int(inst.instance_id)),
-            name=f"webui-autorun-radarr-{inst.instance_id}",
-            daemon=True,
-        ).start()
-    for inst in config.sonarr_instances:
-        threading.Thread(
-            target=_autorun_instance_loop,
-            args=("sonarr", int(inst.instance_id)),
-            name=f"webui-autorun-sonarr-{inst.instance_id}",
-            daemon=True,
-        ).start()
+    def _ensure_autorun_threads(cfg: RuntimeConfig) -> None:
+        for app_type, instances in (("radarr", cfg.radarr_instances), ("sonarr", cfg.sonarr_instances)):
+            for inst in instances:
+                key = (app_type, int(inst.instance_id))
+                if key in autorun_threads_started:
+                    continue
+                autorun_threads_started.add(key)
+                threading.Thread(
+                    target=_autorun_instance_loop,
+                    args=key,
+                    name=f"webui-autorun-{app_type}-{inst.instance_id}",
+                    daemon=True,
+                ).start()
+
+    _ensure_autorun_threads(config)
 
     @app.get("/")
     def index() -> str:
@@ -653,6 +798,17 @@ def create_app(config_path: str) -> Flask:
       background: var(--bg-primary);
       color: var(--text-primary);
       -webkit-font-smoothing: antialiased;
+    }
+    body.auth-locked {
+      overflow: hidden;
+      background:
+        radial-gradient(960px 540px at 14% 10%, rgba(249, 115, 22, 0.14), transparent 58%),
+        radial-gradient(920px 520px at 88% 16%, rgba(251, 146, 60, 0.10), transparent 55%),
+        linear-gradient(180deg, #0b0d11, #050608);
+    }
+    body.auth-locked .app,
+    body.auth-locked .settings-save-fab {
+      display: none;
     }
 
     .app {
@@ -792,7 +948,7 @@ def create_app(config_path: str) -> Flask:
     #msg { color: var(--text-muted); font-size: 13px; }
     .cards-grid {
       display: grid;
-      grid-template-columns: repeat(2, minmax(320px, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 12px;
       margin-bottom: 12px;
     }
@@ -804,17 +960,75 @@ def create_app(config_path: str) -> Flask:
     }
     .instance-head {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
-      gap: 10px;
+      gap: 14px;
       margin-bottom: 10px;
       padding-bottom: 10px;
       border-bottom: 1px solid rgba(71, 85, 105, 0.35);
     }
+    .instance-main { min-width: 0; flex: 1; }
+    .instance-eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
     .instance-title {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 10px;
       font-weight: 700;
       color: var(--text-secondary);
       font-size: 14px;
+      min-width: 0;
+    }
+    .instance-name {
+      color: var(--text-primary);
+      font-size: 28px;
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: -.03em;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .instance-id {
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .instance-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 10px;
+      margin-top: 10px;
+      color: var(--text-muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .instance-meta .dot {
+      opacity: 0.5;
+    }
+    .instance-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .instance-actions-row {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
     }
     .pill-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
     .big-countdown {
@@ -872,6 +1086,22 @@ def create_app(config_path: str) -> Flask:
       margin-bottom: 12px;
     }
     .card h3 { margin: 0 0 10px 0; font-size: 14px; color: var(--text-secondary); }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .section-head h3 {
+      margin: 0;
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+    .section-head .subline {
+      font-size: 12px;
+    }
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); white-space: nowrap; transition: background 0.2s; }
@@ -1007,6 +1237,15 @@ def create_app(config_path: str) -> Flask:
     }
     .btn-mini:hover { border-color: rgba(239, 68, 68, 0.52); background: rgba(239, 68, 68, 0.22); }
     .btn-mini:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-mini.force {
+      background: rgba(239, 68, 68, 0.16);
+      border-color: rgba(239, 68, 68, 0.28);
+      color: rgba(254, 202, 202, 0.98);
+    }
+    .btn-mini.force:hover {
+      border-color: rgba(239, 68, 68, 0.52);
+      background: rgba(239, 68, 68, 0.22);
+    }
     .settings-grid {
       grid-template-columns: repeat(2, minmax(340px, 1fr));
     }
@@ -1085,12 +1324,51 @@ def create_app(config_path: str) -> Flask:
     }
     /* In a two-column row, both columns should align to the same top edge. */
     .two-col .field { margin-top: 0; }
+    @media (max-width: 1500px) {
+      .cards-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 1150px) {
+      .instance-head { flex-direction: column; }
+      .instance-actions {
+        width: 100%;
+        align-items: flex-start;
+      }
+      .instance-actions-row {
+        justify-content: flex-start;
+      }
+    }
     @media (max-width: 900px) {
       .app { grid-template-columns: 1fr; }
       .sidebar { display: none; }
       .cards-grid { grid-template-columns: 1fr; }
       .settings-grid { grid-template-columns: 1fr; }
       .two-col { grid-template-columns: 1fr; }
+      .auth-splash {
+        padding: 20px 16px;
+        padding-top: 40px;
+      }
+      .auth-splash-card {
+        width: 100%;
+        gap: 16px;
+      }
+      .auth-splash-brand {
+        width: 100%;
+        max-width: 100%;
+        padding: 12px;
+      }
+      .auth-splash-brand img {
+        width: 100%;
+      }
+      .auth-panel {
+        width: 100%;
+        padding: 16px;
+      }
+      .settings-save-fab {
+        left: 16px;
+        right: 16px;
+        bottom: 16px;
+        justify-content: space-between;
+      }
     }
 
     .modal {
@@ -1104,10 +1382,20 @@ def create_app(config_path: str) -> Flask:
       padding: 18px;
     }
     .modal.show { display: flex; }
+    .auth-splash {
+      align-items: flex-start;
+      justify-content: center;
+      background:
+        radial-gradient(860px 480px at 50% 0%, rgba(249, 115, 22, 0.14), transparent 60%),
+        radial-gradient(680px 340px at 50% 14%, rgba(255, 255, 255, 0.03), transparent 70%),
+        linear-gradient(180deg, rgba(8, 9, 11, 0.985), rgba(4, 5, 7, 0.995));
+      padding: 32px 20px;
+      padding-top: 48px;
+    }
     .modal-card {
       width: min(520px, 100%);
-      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
-      border: 1px solid rgba(255,255,255,.10);
+      background: linear-gradient(180deg, rgba(20, 22, 27, 0.985), rgba(10, 11, 14, 0.995));
+      border: 1px solid rgba(255,255,255,.08);
       border-radius: 14px;
       box-shadow: 0 18px 60px rgba(0,0,0,.55);
       padding: 14px;
@@ -1116,6 +1404,70 @@ def create_app(config_path: str) -> Flask:
     .modal-title { font-weight: 800; letter-spacing:.06em; text-transform: uppercase; color: var(--text-secondary); font-size: 13px; }
     .modal-body { margin-top: 12px; }
     .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top: 12px; }
+    .auth-splash-card {
+      width: min(680px, 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 22px;
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+      padding: 0;
+    }
+    .auth-splash-brand {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: min(520px, 100%);
+      padding: 18px;
+      border-radius: 24px;
+      border: 1px solid rgba(249, 115, 22, 0.16);
+      background:
+        radial-gradient(420px 180px at 16% 8%, rgba(255,255,255,0.05), transparent 62%),
+        linear-gradient(180deg, rgba(20, 22, 28, 0.94), rgba(10, 11, 14, 0.98));
+      box-shadow:
+        0 18px 46px rgba(0,0,0,0.36),
+        0 0 0 1px rgba(255,255,255,0.02) inset,
+        inset 0 1px 0 rgba(255,255,255,0.03);
+    }
+    .auth-splash-brand img {
+      width: min(100%, 468px);
+      height: auto;
+      display: block;
+      filter: drop-shadow(0 12px 28px rgba(0,0,0,0.2));
+    }
+    .auth-panel {
+      width: 100%;
+      padding: 20px 20px 18px 20px;
+      border-radius: 22px;
+      border: 1px solid rgba(249, 115, 22, 0.12);
+      background:
+        linear-gradient(180deg, rgba(14, 16, 20, 0.96), rgba(8, 10, 14, 0.985));
+      box-shadow:
+        0 18px 48px rgba(0,0,0,0.36),
+        inset 0 1px 0 rgba(255,255,255,0.03);
+    }
+    .auth-panel .modal-title {
+      font-size: 14px;
+      color: #f8fafc;
+      letter-spacing: .04em;
+    }
+    .auth-panel .modal-body {
+      margin-top: 14px;
+    }
+    .auth-panel .subline {
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .auth-panel input.cfg {
+      height: 42px;
+      background: rgba(15, 23, 42, 0.42);
+    }
+    .auth-panel .modal-actions {
+      margin-top: 16px;
+    }
     .btn-primary {
       border: 1px solid rgba(255, 255, 255, 0.10);
       background: linear-gradient(180deg, rgba(249, 115, 22, 0.95), rgba(234, 88, 12, 0.88));
@@ -1127,26 +1479,188 @@ def create_app(config_path: str) -> Flask:
       cursor: pointer;
     }
     .btn-primary:disabled { opacity:.55; cursor:not-allowed; }
+    .btn-secondary {
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-primary);
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-weight: 700;
+      letter-spacing: .03em;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+    .btn-secondary:hover {
+      border-color: rgba(249, 115, 22, 0.35);
+      background: rgba(249, 115, 22, 0.08);
+    }
+    .btn-danger {
+      border: 1px solid rgba(239, 68, 68, 0.32);
+      background: linear-gradient(180deg, rgba(127, 29, 29, 0.95), rgba(153, 27, 27, 0.9));
+      color: #fee2e2;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-weight: 800;
+      letter-spacing: .04em;
+      cursor: pointer;
+    }
+    .btn-danger:hover {
+      border-color: rgba(248, 113, 113, 0.45);
+      background: linear-gradient(180deg, rgba(153, 27, 27, 0.98), rgba(185, 28, 28, 0.92));
+    }
+    .btn-danger:disabled { opacity:.55; cursor:not-allowed; }
+    .settings-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .settings-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .settings-save-fab {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      z-index: 950;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(9, 10, 12, 0.92);
+      border: 1px solid rgba(249, 115, 22, 0.18);
+      box-shadow: 0 16px 40px rgba(0,0,0,0.45);
+      backdrop-filter: blur(14px);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(18px);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      max-width: min(420px, calc(100vw - 32px));
+    }
+    .settings-save-fab.show {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    .settings-save-fab .subline {
+      margin: 0;
+      min-width: 0;
+    }
+    .toast-stack {
+      position: fixed;
+      right: 24px;
+      bottom: 96px;
+      z-index: 980;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 10px;
+      pointer-events: none;
+      max-width: min(360px, calc(100vw - 32px));
+    }
+    .toast {
+      min-width: 240px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(249, 115, 22, 0.16);
+      background: linear-gradient(180deg, rgba(16, 18, 24, 0.98), rgba(9, 10, 12, 0.995));
+      color: var(--text-primary);
+      box-shadow: 0 18px 40px rgba(0,0,0,0.34);
+      transform: translateY(10px);
+      opacity: 0;
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .toast.success {
+      border-color: rgba(34, 197, 94, 0.26);
+      box-shadow: 0 18px 40px rgba(0,0,0,0.34), 0 0 0 1px rgba(34, 197, 94, 0.06) inset;
+    }
+    .toast-title {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+    .toast-text {
+      font-size: 13px;
+      line-height: 1.45;
+      color: var(--text-primary);
+    }
   </style>
 </head>
-<body>
-  <div class="modal" id="auth-modal">
+<body class="auth-locked">
+  <div class="modal auth-splash" id="auth-modal">
+    <div class="modal-card auth-splash-card">
+      <div class="auth-splash-brand">
+        <img src="/branding/banner.svg" alt="Seekarr banner"/>
+      </div>
+      <div class="auth-panel">
+        <div class="modal-row">
+          <div class="modal-title" id="auth-title">Authentication</div>
+        </div>
+        <div class="modal-body">
+          <div class="subline" id="auth-sub" style="margin-bottom:10px;">Enter your Web UI password.</div>
+          <div class="field">
+            <div class="label" id="auth-label">Password</div>
+            <input class="cfg mono" id="auth-password" name="seekarr_webui_password" type="password" value=""
+                   autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
+            <div class="subline" id="auth-hint" style="margin-top:6px;"></div>
+          </div>
+          <div class="subline" id="auth-error" style="margin-top:10px; color: rgba(254, 202, 202, 0.98);"></div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-primary" id="auth-submit">CONTINUE</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal" id="delete-instance-modal">
     <div class="modal-card">
       <div class="modal-row">
-        <div class="modal-title" id="auth-title">Authentication</div>
+        <div class="modal-title">Remove Instance</div>
       </div>
       <div class="modal-body">
-        <div class="subline" id="auth-sub" style="margin-bottom:10px;">Enter your Web UI password.</div>
-        <div class="field">
-          <div class="label" id="auth-label">Password</div>
-          <input class="cfg mono" id="auth-password" name="seekarr_webui_password" type="password" value=""
-                 autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
-          <div class="subline" id="auth-hint" style="margin-top:6px;"></div>
+        <div id="delete-instance-sub" style="font-size:15px; line-height:1.45; color:var(--text-secondary);"></div>
+        <div
+          id="delete-instance-warning"
+          style="display:none; margin-top:12px; padding:12px; border-radius:10px; border:1px solid rgba(245, 158, 11, 0.22); background:rgba(245, 158, 11, 0.08); color:rgba(253, 230, 138, 0.96); font-size:13px; line-height:1.45;"
+        ></div>
+        <div class="subline" style="margin-top:12px; color:rgba(254, 202, 202, 0.92);">
+          This removes the instance configuration, stored API key, schedule state, and instance-specific history.
         </div>
-        <div class="subline" id="auth-error" style="margin-top:10px; color: rgba(254, 202, 202, 0.98);"></div>
+        <div class="field" style="margin-top:16px;">
+          <div class="label">Current Web UI Password</div>
+          <input
+            class="cfg mono"
+            id="delete-instance-password"
+            name="seekarr_delete_password"
+            type="password"
+            value=""
+            autocomplete="current-password"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+          />
+        </div>
+        <div class="subline" id="delete-instance-error" style="margin-top:10px; color: rgba(254, 202, 202, 0.98);"></div>
       </div>
       <div class="modal-actions">
-        <button class="btn-primary" id="auth-submit">CONTINUE</button>
+        <button class="btn-secondary" id="delete-instance-cancel" type="button">CANCEL</button>
+        <button class="btn-danger" id="delete-instance-submit" type="button">REMOVE INSTANCE</button>
       </div>
     </div>
   </div>
@@ -1195,7 +1709,10 @@ def create_app(config_path: str) -> Flask:
         <div class="cards-grid" id="instance-cards"></div>
 
         <div class="card">
-          <h3>Recent Actions</h3>
+          <div class="section-head">
+            <h3>Recent Actions</h3>
+            <div class="subline">Across all configured instances</div>
+          </div>
           <div id="recent-actions" class="mono">-</div>
         </div>
       </section>
@@ -1210,7 +1727,17 @@ def create_app(config_path: str) -> Flask:
       </section>
 
       <section class="content-section" id="section-settings">
-        <div id="settings-tabs" style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;"></div>
+        <div class="settings-head">
+          <div id="settings-tabs" style="display:flex; gap:8px; flex-wrap:wrap;"></div>
+          <div class="settings-actions">
+            <button class="btn-secondary" id="add-radarr-instance" type="button">
+            + Add Radarr Instance
+            </button>
+            <button class="btn-secondary" id="add-sonarr-instance" type="button">
+            + Add Sonarr Instance
+            </button>
+          </div>
+        </div>
         
         <div id="settings-content-wrapper">
           <div class="card settings-tab-content" id="settings-tab-global" style="margin-top:0; padding:20px;">
@@ -1233,14 +1760,14 @@ def create_app(config_path: str) -> Flask:
           
           <div id="settings-instance-cards"></div>
         </div>
-
-        <div class="actions" style="justify-content:flex-end; margin-top:20px; padding-top:20px; border-top:1px solid rgba(255,255,255,0.05);">
-          <span class="subline" id="settings-msg" style="margin-right:16px; font-size:14px; font-weight:600; color:var(--text-secondary);"></span>
-          <button class="btn-primary" id="save-settings" style="padding:10px 24px; font-size:14px; box-shadow: 0 4px 12px rgba(249, 115, 22, 0.2);">SAVE CONFIGURATION</button>
-        </div>
       </section>
     </main>
   </div>
+  <div class="settings-save-fab" id="settings-save-fab">
+    <span class="subline" id="settings-msg"></span>
+    <button class="btn-primary" id="save-settings" type="button" style="padding:10px 24px; font-size:14px; box-shadow: 0 4px 12px rgba(249, 115, 22, 0.2);">SAVE CONFIGURATION</button>
+  </div>
+  <div class="toast-stack" id="toast-stack"></div>
   <script>
     let authHeader = '';
     let passwordIsSet = false;
@@ -1251,6 +1778,11 @@ def create_app(config_path: str) -> Flask:
     let activeTimeZone = '';
     let refreshTimer = null;
     let countdownTimer = null;
+    let settingsBaseline = '';
+    let settingsDirty = false;
+    let settingsStatusMessage = '';
+    let deleteInstanceTarget = null;
+    let toastSeq = 0;
     const authStorageKey = 'seekarr_auth_header';
     const timezoneFallback = [
       'UTC', 'Etc/UTC',
@@ -1348,16 +1880,92 @@ def create_app(config_path: str) -> Flask:
         title.textContent = 'Unlock Seekarr';
         sub.textContent = 'Enter your Web UI password to continue.';
         label.textContent = 'Password';
-        pw.setAttribute('autocomplete', 'new-password');
+        pw.setAttribute('autocomplete', 'current-password');
         hint.textContent = '';
       }
 
+      document.body.classList.add('auth-locked');
       modal.classList.add('show');
       setTimeout(() => pw.focus(), 50);
     }
 
     function hideAuthModal() {
       document.getElementById('auth-modal').classList.remove('show');
+      document.body.classList.remove('auth-locked');
+    }
+
+    function showDeleteInstanceModal(target) {
+      deleteInstanceTarget = target || null;
+      const modal = document.getElementById('delete-instance-modal');
+      const sub = document.getElementById('delete-instance-sub');
+      const warning = document.getElementById('delete-instance-warning');
+      const err = document.getElementById('delete-instance-error');
+      const pw = document.getElementById('delete-instance-password');
+      const btn = document.getElementById('delete-instance-submit');
+      const appLabel = String(target?.app || '').toUpperCase();
+      const instanceLabel = String(target?.instanceName || `#${target?.instanceId || ''}`).trim();
+
+      sub.textContent = `Enter your Web UI password to remove ${appLabel} instance "${instanceLabel}".`;
+      if (target?.discardUnsaved) {
+        warning.style.display = 'block';
+        warning.textContent = 'You have unsaved configuration changes. Removing this instance will discard them.';
+      } else {
+        warning.style.display = 'none';
+        warning.textContent = '';
+      }
+      err.textContent = '';
+      pw.value = '';
+      btn.disabled = false;
+      modal.classList.add('show');
+      setTimeout(() => pw.focus(), 50);
+    }
+
+    function hideDeleteInstanceModal() {
+      document.getElementById('delete-instance-modal').classList.remove('show');
+      document.getElementById('delete-instance-error').textContent = '';
+      document.getElementById('delete-instance-password').value = '';
+      document.getElementById('delete-instance-submit').disabled = false;
+      deleteInstanceTarget = null;
+    }
+
+    async function submitDeleteInstance() {
+      if (!deleteInstanceTarget) return;
+      const msg = document.getElementById('settings-msg');
+      const err = document.getElementById('delete-instance-error');
+      const pw = document.getElementById('delete-instance-password');
+      const btn = document.getElementById('delete-instance-submit');
+      const confirmPassword = String(pw.value || '');
+      err.textContent = '';
+      btn.disabled = true;
+
+      try {
+        const r = await apiFetch('/api/instances/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            app: deleteInstanceTarget.app,
+            instance_id: deleteInstanceTarget.instanceId,
+            confirm_password: confirmPassword,
+          }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          err.textContent = data.error || 'Remove failed';
+          btn.disabled = false;
+          return;
+        }
+        hideDeleteInstanceModal();
+        window.settingsActiveTab = 'global';
+        msg.textContent = 'Instance removed';
+        settingsStatusMessage = 'Instance removed';
+        syncSettingsSaveFab();
+        await loadSettings();
+        await refresh();
+        showToast('Instance Removed', 'Returned to Global Settings.');
+      } catch (e) {
+        err.textContent = 'Remove failed';
+        btn.disabled = false;
+      }
     }
 
     async function ensureAuth() {
@@ -1369,6 +1977,7 @@ def create_app(config_path: str) -> Flask:
       if (authHeader) {
         const ok = await apiFetch('/api/status').then(r => r.ok).catch(() => false);
         if (ok) {
+          hideAuthModal();
           await refresh();
           startTimers();
           authInFlight = false;
@@ -1429,6 +2038,92 @@ def create_app(config_path: str) -> Flask:
         : `<span class="badge off"${t}>${label}</span>`;
     }
     function safe(v) { return (v === null || v === undefined) ? '' : String(v); }
+    function showToast(title, text, tone='success') {
+      const stack = document.getElementById('toast-stack');
+      if (!stack) return;
+      const toast = document.createElement('div');
+      const id = `toast-${++toastSeq}`;
+      toast.className = `toast ${tone}`;
+      toast.id = id;
+      toast.innerHTML = `<div class="toast-title">${safe(title)}</div><div class="toast-text">${safe(text)}</div>`;
+      stack.appendChild(toast);
+      requestAnimationFrame(() => toast.classList.add('show'));
+      window.setTimeout(() => {
+        toast.classList.remove('show');
+        window.setTimeout(() => {
+          const el = document.getElementById(id);
+          if (el) el.remove();
+        }, 180);
+      }, 2600);
+    }
+    function syncSettingsSaveFab() {
+      const fab = document.getElementById('settings-save-fab');
+      const msg = document.getElementById('settings-msg');
+      const btn = document.getElementById('save-settings');
+      if (!fab || !msg || !btn) return;
+      const show = settingsDirty || btn.disabled;
+      fab.classList.toggle('show', show);
+      msg.textContent = settingsStatusMessage || (settingsDirty ? 'Unsaved configuration changes' : '');
+    }
+    function setSettingsDirtyState(dirty, message='') {
+      settingsDirty = !!dirty;
+      settingsStatusMessage = message;
+      syncSettingsSaveFab();
+    }
+    function buildSettingsPayload() {
+      const instances = [];
+      document.querySelectorAll('#settings-instance-cards [data-key]').forEach(tr => {
+        const key = tr.getAttribute('data-key') || '';
+        const parts = key.split(':');
+        if (parts.length < 2) return;
+        const app = parts[0];
+        const instance_id = Number(parts[1] || 0);
+        instances.push({
+          app,
+          instance_id,
+          instance_name: String(tr.querySelector('.si_name')?.value || '').trim(),
+          enabled: !!tr.querySelector('.si_enabled')?.checked,
+          interval_minutes: Number(tr.querySelector('.si_interval')?.value || 0),
+          search_missing: !!tr.querySelector('.si_missing')?.checked,
+          search_cutoff_unmet: !!tr.querySelector('.si_cutoff')?.checked,
+          upgrade_scope: String(tr.querySelector('.si_upgrade_scope')?.value || 'wanted'),
+          search_order: String(tr.querySelector('.si_search_order')?.value || 'smart'),
+          quiet_hours_start: String(tr.querySelector('.si_quiet_start')?.value || '').trim(),
+          quiet_hours_end: String(tr.querySelector('.si_quiet_end')?.value || '').trim(),
+          min_hours_after_release: Number(tr.querySelector('.si_after_release')?.value || 0),
+          min_seconds_between_actions: Number(tr.querySelector('.si_between')?.value || 0),
+          max_missing_actions_per_instance_per_sync: Number(tr.querySelector('.si_missing_per_run')?.value || 0),
+          max_cutoff_actions_per_instance_per_sync: Number(tr.querySelector('.si_upgrades_per_run')?.value || 0),
+          sonarr_missing_mode: (app === 'sonarr') ? String(tr.querySelector('.si_missing_mode')?.value || 'smart') : undefined,
+          item_retry_hours: Number(tr.querySelector('.si_retry')?.value || 0),
+          rate_window_minutes: Number(tr.querySelector('.si_rate_window')?.value || 0),
+          rate_cap: Number(tr.querySelector('.si_rate_cap')?.value || 0),
+          arr_url: String(tr.querySelector('.si_url')?.value || '').trim(),
+          arr_api_key: String(tr.querySelector('.si_apikey')?.value || '').trim(),
+        });
+      });
+      instances.sort((a, b) => {
+        if (a.app !== b.app) return a.app.localeCompare(b.app);
+        return a.instance_id - b.instance_id;
+      });
+      return {
+        app: {
+          quiet_hours_timezone: String(document.getElementById('settings-quiet-timezone')?.value || '').trim(),
+        },
+        instances,
+      };
+    }
+    function settingsPayloadFingerprint(payload) {
+      return JSON.stringify(payload || { app: { quiet_hours_timezone: '' }, instances: [] });
+    }
+    function refreshSettingsDirtyState(message='') {
+      const current = settingsPayloadFingerprint(buildSettingsPayload());
+      setSettingsDirtyState(current !== settingsBaseline, message);
+    }
+    function confirmDiscardUnsavedSettings(actionLabel) {
+      if (!settingsDirty) return true;
+      return confirm(`You have unsaved configuration changes. ${actionLabel} will discard them. Continue?`);
+    }
     function getTimeZoneLabel() {
       return activeTimeZone ? activeTimeZone : 'local';
     }
@@ -1594,9 +2289,13 @@ def create_app(config_path: str) -> Flask:
 
 
 
+      const instances = Array.isArray(data.config?.instances) ? data.config.instances : [];
       const cards = document.getElementById('instance-cards');
       cards.innerHTML = '';
-      for (const i of data.config.instances) {
+      if (!instances.length) {
+        cards.innerHTML = `<div class="card" style="margin:0;"><div class="section-head"><h3>No Instances Configured</h3><div class="subline">Add a Radarr or Sonarr instance from Configuration.</div></div></div>`;
+      }
+      for (const i of instances) {
         const key = `${i.app}:${i.instance_id}`;
         const s = syncMap[key] || {};
         const used = Number((data.rate_status?.[key]?.used) ?? 0);
@@ -1634,21 +2333,37 @@ def create_app(config_path: str) -> Flask:
         const barClass = (used >= cap && cap > 0) ? 'bar cap' : 'bar';
         const canForce = !!i.enabled;
         const disabledAttr = (!canForce || !!rs.running) ? 'disabled' : '';
+        const sourceLabel = i.app === 'radarr' ? 'Movie automation' : 'TV automation';
+        const safeUrl = i.arr_url ? safe(i.arr_url) : 'URL not set';
         cards.innerHTML += `
           <div class="instance-card" data-app="${safe(i.app)}" style="display: flex; flex-direction: column; justify-content: space-between;">
             <div>
               <div class="instance-head" style="margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 16px;">
-                <div class="instance-title" style="display:flex; align-items:center; gap:10px; font-size: 16px;">
-                  <svg width="20" height="20" fill="none" stroke="var(--accent-color)" stroke-width="2" viewBox="0 0 24 24" style="opacity:0.9;"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-                  ${safe(i.app).toUpperCase()} - <span style="font-weight: 500;">${safe(i.instance_name)}</span>
-                  <span style="color:var(--text-muted); font-size:12px; font-weight: 500;">#${safe(i.instance_id)}</span>
+                <div class="instance-main">
+                  <div class="instance-eyebrow">
+                    <svg width="16" height="16" fill="none" stroke="var(--accent-color)" stroke-width="2" viewBox="0 0 24 24" style="opacity:0.9; flex-shrink:0;"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                    <span>${safe(i.app).toUpperCase()}</span>
+                  </div>
+                  <div class="instance-title">
+                    <span class="instance-name">${safe(i.instance_name)}</span>
+                    <span class="instance-id">#${safe(i.instance_id)}</span>
+                  </div>
+                  <div class="instance-meta">
+                    <span>${sourceLabel}</span>
+                    <span class="dot">•</span>
+                    <span class="mono">${safeUrl}</span>
+                  </div>
                 </div>
-                <div class="pill-row" style="gap: 8px;">
-                  <span class="status ${statusClass}" style="padding: 4px 10px; font-size: 12px;">${statusText}</span>
-                  <button class="icon-btn" onclick="window.settingsActiveTab='${safe(i.app)}:${safe(i.instance_id)}'; setSection('settings'); loadSettings(); return false;" title="Configure Instance" style="padding: 5px 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.1)'; this.style.color='#fff';" onmouseout="this.style.background='rgba(255,255,255,0.05)'; this.style.color='var(--text-secondary)';">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-                  </button>
-                  <button class="btn-mini" data-force-app="${safe(i.app)}" data-force-id="${safe(i.instance_id)}" ${disabledAttr} style="padding: 5px 14px;">FORCE</button>
+                <div class="instance-actions">
+                  <div class="instance-actions-row">
+                    <span class="status ${statusClass}" style="padding: 4px 10px; font-size: 12px;">${statusText}</span>
+                  </div>
+                  <div class="instance-actions-row">
+                    <button class="icon-btn" onclick="window.settingsActiveTab='${safe(i.app)}:${safe(i.instance_id)}'; setSection('settings'); loadSettings(); return false;" title="Configure Instance" style="padding: 5px 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.1)'; this.style.color='#fff';" onmouseout="this.style.background='rgba(255,255,255,0.05)'; this.style.color='var(--text-secondary)';">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    </button>
+                    <button class="btn-mini force" data-force-app="${safe(i.app)}" data-force-id="${safe(i.instance_id)}" ${disabledAttr} style="padding: 5px 14px;">FORCE</button>
+                  </div>
                 </div>
               </div>
               <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 16px;">
@@ -1685,7 +2400,6 @@ def create_app(config_path: str) -> Flask:
       // Search History: Tabs + Pagination
       const runsWrap = document.getElementById('runs-wrap');
       const sh = data.search_history || {};
-      const instances = data.config.instances || [];
       if (!window.historyActiveTab && instances.length > 0) {
         window.historyActiveTab = `${instances[0].app}:${instances[0].instance_id}`;
       }
@@ -1799,13 +2513,40 @@ def create_app(config_path: str) -> Flask:
     document.getElementById('auth-password').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') authSubmit();
     });
+    document.getElementById('delete-instance-cancel').addEventListener('click', hideDeleteInstanceModal);
+    document.getElementById('delete-instance-submit').addEventListener('click', submitDeleteInstance);
+    document.getElementById('delete-instance-password').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitDeleteInstance();
+      if (e.key === 'Escape') hideDeleteInstanceModal();
+    });
+    document.getElementById('delete-instance-modal').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) hideDeleteInstanceModal();
+    });
     document.getElementById('settings-instance-cards').addEventListener('click', async (e) => {
-      const btn = e.target && e.target.closest ? e.target.closest('button[data-clear-key]') : null;
-      if (!btn) return;
-      if (btn.disabled) return;
-      const app = String(btn.getAttribute('data-app') || '').trim();
-      const instanceId = Number(btn.getAttribute('data-id') || 0);
+      const msg = document.getElementById('settings-msg');
+      const deleteBtn = e.target && e.target.closest ? e.target.closest('button[data-delete-instance]') : null;
+      if (deleteBtn) {
+        if (deleteBtn.disabled) return;
+        const app = String(deleteBtn.getAttribute('data-app') || '').trim();
+        const instanceId = Number(deleteBtn.getAttribute('data-id') || 0);
+        const instanceName = String(deleteBtn.getAttribute('data-name') || '').trim();
+        if (!app || !instanceId) return;
+        showDeleteInstanceModal({
+          app,
+          instanceId,
+          instanceName: instanceName || `#${instanceId}`,
+          discardUnsaved: settingsDirty,
+        });
+        return;
+      }
+
+      const clearBtn = e.target && e.target.closest ? e.target.closest('button[data-clear-key]') : null;
+      if (!clearBtn) return;
+      if (clearBtn.disabled) return;
+      const app = String(clearBtn.getAttribute('data-app') || '').trim();
+      const instanceId = Number(clearBtn.getAttribute('data-id') || 0);
       if (!app || !instanceId) return;
+      if (!confirmDiscardUnsavedSettings('Deleting the stored API key')) return;
       if (!confirm(`Delete the stored ${app.toUpperCase()} API key for instance #${instanceId}?`)) return;
       const r = await apiFetch('/api/credentials/clear', {
         method: 'POST',
@@ -1813,22 +2554,72 @@ def create_app(config_path: str) -> Flask:
         body: JSON.stringify({ app, instance_id: instanceId }),
       });
       const data = await r.json().catch(() => ({}));
-      const msg = document.getElementById('settings-msg');
       if (!r.ok) {
         msg.textContent = data.error || 'Delete failed';
+        settingsStatusMessage = data.error || 'Delete failed';
+        syncSettingsSaveFab();
         return;
       }
       msg.textContent = 'API key deleted';
+      settingsStatusMessage = 'API key deleted';
+      syncSettingsSaveFab();
       await loadSettings();
     });
     setSection('dashboard');
     ensureAuth();
 
     if (!window.settingsActiveTab) window.settingsActiveTab = 'global';
+    function sortSettingsInstances(instances) {
+      return [...(instances || [])].sort((a, b) => {
+        const appA = String(a.app || '');
+        const appB = String(b.app || '');
+        if (appA !== appB) return appA.localeCompare(appB);
+        return Number(a.instance_id || 0) - Number(b.instance_id || 0);
+      });
+    }
+    function nextSettingsInstanceId(app) {
+      let maxId = 0;
+      (window.settingsInstances || []).forEach(inst => {
+        if (String(inst.app || '').trim().toLowerCase() !== app) return;
+        maxId = Math.max(maxId, Number(inst.instance_id || 0));
+      });
+      return maxId + 1;
+    }
+    function newSettingsInstance(app) {
+      const instanceId = nextSettingsInstanceId(app);
+      const label = app === 'radarr' ? 'Radarr' : 'Sonarr';
+      return {
+        app,
+        instance_id: instanceId,
+        instance_name: `${label} ${instanceId}`,
+        enabled: true,
+        interval_minutes: 15,
+        search_missing: true,
+        search_cutoff_unmet: true,
+        upgrade_scope: 'wanted',
+        search_order: 'smart',
+        quiet_hours_start: '23:00',
+        quiet_hours_end: '06:00',
+        min_hours_after_release: 8,
+        min_seconds_between_actions: 2,
+        max_missing_actions_per_instance_per_sync: 5,
+        max_cutoff_actions_per_instance_per_sync: 1,
+        sonarr_missing_mode: 'smart',
+        item_retry_hours: 72,
+        rate_window_minutes: 60,
+        rate_cap: 25,
+        arr_url: '',
+        api_key_set: false,
+      };
+    }
     window.updateSettingsTabs = function(instances) {
       const tabsWrap = document.getElementById('settings-tabs');
       if (!tabsWrap) return;
-      
+      const instanceKeys = new Set((instances || []).map(inst => `${inst.app}:${inst.instance_id}`));
+      if (window.settingsActiveTab !== 'global' && !instanceKeys.has(window.settingsActiveTab)) {
+        window.settingsActiveTab = (instances && instances.length) ? `${instances[0].app}:${instances[0].instance_id}` : 'global';
+      }
+
       const isGlobal = (window.settingsActiveTab === 'global');
       const gBg = isGlobal ? 'var(--accent-color)' : 'rgba(255,255,255,0.05)';
       const gColor = isGlobal ? '#fff' : 'var(--text-secondary)';
@@ -1841,7 +2632,8 @@ def create_app(config_path: str) -> Flask:
         const bg = isActive ? 'var(--accent-color)' : 'rgba(255,255,255,0.05)';
         const color = isActive ? '#fff' : 'var(--text-secondary)';
         const border = isActive ? 'transparent' : 'rgba(255,255,255,0.1)';
-        html += `<button style="background:${bg}; color:${color}; border:1px solid ${border}; padding:8px 16px; font-size:13px; font-weight:600; border-radius:8px; cursor:pointer;" onclick="window.settingsActiveTab='${key}'; window.updateSettingsTabs(window.settingsInstances); return false;">${safe(inst.app).toUpperCase()} - ${safe(inst.instance_name)}</button>`;
+        const instanceName = String(inst.instance_name || `${String(inst.app || '').toUpperCase()} ${inst.instance_id}`).trim();
+        html += `<button style="background:${bg}; color:${color}; border:1px solid ${border}; padding:8px 16px; font-size:13px; font-weight:600; border-radius:8px; cursor:pointer;" onclick="window.settingsActiveTab='${key}'; window.updateSettingsTabs(window.settingsInstances); return false;">${safe(inst.app).toUpperCase()} - ${safe(instanceName)}</button>`;
       });
       tabsWrap.innerHTML = html;
 
@@ -1850,19 +2642,16 @@ def create_app(config_path: str) -> Flask:
         else el.style.display = 'none';
       });
     };
-
-    async function loadSettings() {
-      populateTimezoneOptions();
-      const r = await apiFetch('/api/settings', { cache:'no-store' });
-      const data = await r.json();
-      const appCfg = data.app || {};
-      document.getElementById('settings-quiet-timezone').value = String(appCfg.quiet_hours_timezone || '').trim();
-
+    function renderSettingsCards(instances) {
       const wrap = document.getElementById('settings-instance-cards');
       wrap.innerHTML = '';
-      window.settingsInstances = data.instances || [];
+      window.settingsInstances = sortSettingsInstances(instances);
+      if (!window.settingsInstances.length) {
+        wrap.innerHTML = `<div class="card settings-tab-content" id="settings-tab-empty" style="padding:20px; margin-top:0;"><div class="subline">No instances configured yet. Use the add buttons above to create a Radarr or Sonarr instance.</div></div>`;
+      }
       for (const inst of window.settingsInstances) {
         const key = `${inst.app}:${inst.instance_id}`;
+        const instanceName = String(inst.instance_name || `${String(inst.app || '').toUpperCase()} ${inst.instance_id}`).trim();
         const mode = String(inst.sonarr_missing_mode || 'smart').toLowerCase();
         const upgradeScopeRaw = String(inst.upgrade_scope || 'wanted').toLowerCase();
         const upgradeScope = (upgradeScopeRaw === 'all_monitored') ? 'both' : upgradeScopeRaw;
@@ -1969,7 +2758,7 @@ def create_app(config_path: str) -> Flask:
               <div>
                 <div class="instance-title" style="font-size:18px; display:flex; gap:10px; align-items:center;">
                   <svg width="22" height="22" fill="none" stroke="var(--accent-color)" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-                  ${safe(inst.app).toUpperCase()} - ${safe(inst.instance_name)} 
+                  ${safe(inst.app).toUpperCase()} - ${safe(instanceName)}
                   <span style="color:var(--text-muted); font-size:13px; font-weight:500;">#${safe(inst.instance_id)}</span>
                 </div>
                 <div class="subline mono" style="margin-top:8px; opacity:0.8;">${safe(inst.arr_url) || '-'}</div>
@@ -1985,6 +2774,10 @@ def create_app(config_path: str) -> Flask:
             <div style="background:rgba(255,255,255,0.015); border:1px solid rgba(255,255,255,0.05); border-radius:12px; padding:20px; margin-bottom:24px;">
               <h4 style="margin:0 0 16px 0; color:var(--text-primary); font-size:16px; letter-spacing:0.02em; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:10px;">Connection Details</h4>
               <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:20px; align-items:end;">
+                <div class="field">
+                  <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Instance Name</div>
+                  <input class="cfg si_name" type="text" value="${safe(instanceName)}" style="width:100%; min-height:40px; display:block; padding:8px 12px; box-sizing:border-box; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                </div>
                 <div class="field">
                   <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Arr URL</div>
                   <input class="cfg mono si_url" type="text" value="${safe(inst.arr_url)}" style="width:100%; min-height:40px; display:block; padding:8px 12px; box-sizing:border-box; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
@@ -2027,6 +2820,24 @@ def create_app(config_path: str) -> Flask:
               </div>
             </div>
 
+            <div style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.18); border-radius:12px; padding:20px; margin-bottom:4px;">
+              <h4 style="margin:0 0 8px 0; color:#fecaca; font-size:16px; letter-spacing:0.02em;">Remove Instance</h4>
+              <div class="subline" style="margin-bottom:16px; color:rgba(254,202,202,0.88);">
+                Removes this instance from Seekarr and deletes its stored API key, schedule state, and instance-specific history.
+              </div>
+              <button
+                class="btn-secondary"
+                type="button"
+                data-delete-instance="1"
+                data-app="${safe(inst.app)}"
+                data-id="${safe(inst.instance_id)}"
+                data-name="${safe(instanceName)}"
+                style="border-color:rgba(239,68,68,0.38); background:rgba(239,68,68,0.12); color:#fecaca;"
+              >
+                Remove This Instance
+              </button>
+            </div>
+
           </div>
         `;
 
@@ -2035,68 +2846,94 @@ def create_app(config_path: str) -> Flask:
       window.updateSettingsTabs(window.settingsInstances);
     }
 
-    async function saveSettings() {
-      const msg = document.getElementById('settings-msg');
-      msg.textContent = 'Saving...';
-
-      const instances = [];
-      document.querySelectorAll('#settings-instance-cards [data-key]').forEach(tr => {
-        const key = tr.getAttribute('data-key') || '';
-        const parts = key.split(':');
-        if (parts.length < 2) return;
-        const app = parts[0];
-        const instance_id = Number(parts[1] || 0);
-        instances.push({
-          app,
-          instance_id,
-          enabled: !!tr.querySelector('.si_enabled')?.checked,
-          interval_minutes: Number(tr.querySelector('.si_interval')?.value || 0),
-          search_missing: !!tr.querySelector('.si_missing')?.checked,
-          search_cutoff_unmet: !!tr.querySelector('.si_cutoff')?.checked,
-          upgrade_scope: String(tr.querySelector('.si_upgrade_scope')?.value || 'wanted'),
-          search_order: String(tr.querySelector('.si_search_order')?.value || 'smart'),
-          quiet_hours_start: String(tr.querySelector('.si_quiet_start')?.value || '').trim(),
-          quiet_hours_end: String(tr.querySelector('.si_quiet_end')?.value || '').trim(),
-          min_hours_after_release: Number(tr.querySelector('.si_after_release')?.value || 0),
-          min_seconds_between_actions: Number(tr.querySelector('.si_between')?.value || 0),
-          max_missing_actions_per_instance_per_sync: Number(tr.querySelector('.si_missing_per_run')?.value || 0),
-          max_cutoff_actions_per_instance_per_sync: Number(tr.querySelector('.si_upgrades_per_run')?.value || 0),
-          sonarr_missing_mode: (app === 'sonarr') ? String(tr.querySelector('.si_missing_mode')?.value || 'smart') : undefined,
-          item_retry_hours: Number(tr.querySelector('.si_retry')?.value || 0),
-          rate_window_minutes: Number(tr.querySelector('.si_rate_window')?.value || 0),
-          rate_cap: Number(tr.querySelector('.si_rate_cap')?.value || 0),
-          arr_url: String(tr.querySelector('.si_url')?.value || '').trim(),
-          arr_api_key: String(tr.querySelector('.si_apikey')?.value || '').trim(),
-        });
-      });
-
-      const payload = {
-        app: {
-          quiet_hours_timezone: String(document.getElementById('settings-quiet-timezone')?.value || '').trim(),
-        },
-        instances,
-      };
-
-      const r = await apiFetch('/api/settings', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(payload),
-      });
-      const data = await r.json();
-      if (!r.ok) {
-        msg.textContent = data.error || 'Save failed';
-        return;
-      }
-      msg.textContent = 'Saved';
-      await refresh();
+    function addSettingsInstance(app) {
+      const next = newSettingsInstance(app);
+      window.settingsInstances = sortSettingsInstances([...(window.settingsInstances || []), next]);
+      window.settingsActiveTab = `${next.app}:${next.instance_id}`;
+      renderSettingsCards(window.settingsInstances);
+      refreshSettingsDirtyState();
     }
 
+    async function loadSettings() {
+      populateTimezoneOptions();
+      const r = await apiFetch('/api/settings', { cache:'no-store' });
+      const data = await r.json();
+      const appCfg = data.app || {};
+      document.getElementById('settings-quiet-timezone').value = String(appCfg.quiet_hours_timezone || '').trim();
+      renderSettingsCards(data.instances || []);
+      settingsBaseline = settingsPayloadFingerprint(buildSettingsPayload());
+      setSettingsDirtyState(false, '');
+    }
+
+    async function saveSettings() {
+      const msg = document.getElementById('settings-msg');
+      const btn = document.getElementById('save-settings');
+      btn.disabled = true;
+      settingsStatusMessage = 'Saving...';
+      syncSettingsSaveFab();
+
+      try {
+        const payload = buildSettingsPayload();
+        const instances = payload.instances;
+        const invalidInstance = instances.find(inst => !inst.instance_name);
+        if (invalidInstance) {
+          msg.textContent = `Instance #${invalidInstance.instance_id} needs a name`;
+          settingsStatusMessage = msg.textContent;
+          return;
+        }
+
+        const r = await apiFetch('/api/settings', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(payload),
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          msg.textContent = data.error || 'Save failed';
+          settingsStatusMessage = msg.textContent;
+          return;
+        }
+        msg.textContent = 'Saved';
+        await loadSettings();
+        await refresh();
+      } catch (e) {
+        msg.textContent = 'Save failed';
+        settingsStatusMessage = 'Save failed';
+      } finally {
+        btn.disabled = false;
+        syncSettingsSaveFab();
+      }
+    }
+
+    document.getElementById('add-radarr-instance').addEventListener('click', () => addSettingsInstance('radarr'));
+    document.getElementById('add-sonarr-instance').addEventListener('click', () => addSettingsInstance('sonarr'));
     document.getElementById('save-settings').addEventListener('click', saveSettings);
+    document.getElementById('section-settings').addEventListener('input', (e) => {
+      const target = e.target;
+      if (!target || !(target instanceof HTMLElement)) return;
+      if (
+        target.id === 'settings-quiet-timezone' ||
+        target.closest('#settings-instance-cards')
+      ) {
+        refreshSettingsDirtyState();
+      }
+    });
+    document.getElementById('section-settings').addEventListener('change', (e) => {
+      const target = e.target;
+      if (!target || !(target instanceof HTMLElement)) return;
+      if (
+        target.id === 'settings-quiet-timezone' ||
+        target.closest('#settings-instance-cards')
+      ) {
+        refreshSettingsDirtyState();
+      }
+    });
     document.querySelectorAll('.nav-item').forEach(a => {
       a.addEventListener('click', () => {
         if (a.dataset.section === 'settings') loadSettings();
       });
     });
+    syncSettingsSaveFab();
   </script>
 </body>
 </html>
@@ -2169,6 +3006,7 @@ def create_app(config_path: str) -> Flask:
 
         try:
             store.set_ui_app_settings(quiet_hours_timezone=str(app_in.get("quiet_hours_timezone") or "").strip())
+            seen_keys: set[tuple[str, int]] = set()
 
             for row in inst_in:
                 if not isinstance(row, dict):
@@ -2180,14 +3018,20 @@ def create_app(config_path: str) -> Flask:
                     iid = 0
                 if app_name not in ("radarr", "sonarr") or iid <= 0:
                     continue
+                key = (app_name, iid)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
 
                 values = {
+                    "instance_name": str(row.get("instance_name") or _default_instance_name(app_name, iid)).strip()
+                    or _default_instance_name(app_name, iid),
                     "enabled": 1 if bool(row.get("enabled", True)) else 0,
-                    "interval_minutes": max(1, int(row.get("interval_minutes") or 15)),
+                    "interval_minutes": max(15, min(60, int(row.get("interval_minutes") or 15))),
                     "search_missing": 1 if bool(row.get("search_missing", True)) else 0,
                     "search_cutoff_unmet": 1 if bool(row.get("search_cutoff_unmet", True)) else 0,
-                    "upgrade_scope": str(row.get("upgrade_scope") or "wanted").strip().lower(),
-                    "search_order": str(row.get("search_order") or "smart").strip().lower(),
+                    "upgrade_scope": _normalize_upgrade_scope(row.get("upgrade_scope") or "wanted"),
+                    "search_order": _normalize_search_order(row.get("search_order") or "smart"),
                     "quiet_hours_start": str(row.get("quiet_hours_start") or "").strip(),
                     "quiet_hours_end": str(row.get("quiet_hours_end") or "").strip(),
                     "min_hours_after_release": max(0, int(row.get("min_hours_after_release") or 0)),
@@ -2198,7 +3042,7 @@ def create_app(config_path: str) -> Flask:
                     "max_cutoff_actions_per_instance_per_sync": max(
                         0, int(row.get("max_cutoff_actions_per_instance_per_sync") or 0)
                     ),
-                    "sonarr_missing_mode": str(row.get("sonarr_missing_mode") or "smart").strip().lower(),
+                    "sonarr_missing_mode": _normalize_sonarr_missing_mode(row.get("sonarr_missing_mode") or "smart"),
                     "item_retry_hours": max(1, int(row.get("item_retry_hours") or 1)),
                     "rate_window_minutes": max(1, int(row.get("rate_window_minutes") or 1)),
                     "rate_cap": max(1, int(row.get("rate_cap") or 1)),

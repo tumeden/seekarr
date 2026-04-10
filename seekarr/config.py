@@ -358,15 +358,11 @@ def load_config(path: str) -> RuntimeConfig:
     radarr_instances = parse_instances("radarr", "radarr")
     sonarr_instances = parse_instances("sonarr", "sonarr")
 
-    # Backward-compat: allow old movie_hunt/tv_hunt sections.
-    if not radarr_instances:
-        for inst in parse_instances("movie_hunt", "radarr"):
-            radarr_instances.append(inst)
-    if not sonarr_instances:
-        for inst in parse_instances("tv_hunt", "sonarr"):
-            sonarr_instances.append(inst)
+    has_explicit_instance_lists = any(
+        isinstance(section, dict) and ("instances" in section) for section in raw.values()
+    )
 
-    if not radarr_instances and not sonarr_instances:
+    if not radarr_instances and not sonarr_instances and not has_explicit_instance_lists:
         radarr_raw = raw.get("radarr", {})
         sonarr_raw = raw.get("sonarr", {})
         if radarr_raw.get("enabled", True):

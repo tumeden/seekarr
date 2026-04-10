@@ -2333,7 +2333,6 @@ def create_app(config_path: str) -> Flask:
         const barClass = (used >= cap && cap > 0) ? 'bar cap' : 'bar';
         const canForce = !!i.enabled;
         const disabledAttr = (!canForce || !!rs.running) ? 'disabled' : '';
-        const sourceLabel = i.app === 'radarr' ? 'Movie automation' : 'TV automation';
         const safeUrl = i.arr_url ? safe(i.arr_url) : 'URL not set';
         cards.innerHTML += `
           <div class="instance-card" data-app="${safe(i.app)}" style="display: flex; flex-direction: column; justify-content: space-between;">
@@ -2349,8 +2348,6 @@ def create_app(config_path: str) -> Flask:
                     <span class="instance-id">#${safe(i.instance_id)}</span>
                   </div>
                   <div class="instance-meta">
-                    <span>${sourceLabel}</span>
-                    <span class="dot">•</span>
                     <span class="mono">${safeUrl}</span>
                   </div>
                 </div>

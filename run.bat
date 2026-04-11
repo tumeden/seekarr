@@ -29,9 +29,8 @@ if errorlevel 1 (
 )
 
 if not exist ".\config.yaml" (
-  echo [ERROR] config.yaml not found.
-  pause
-  exit /b 1
+  echo config.yaml not found. Seekarr will create a default config on first start.
+  echo.
 )
 
 python .\webui_main.py --config .\config.yaml

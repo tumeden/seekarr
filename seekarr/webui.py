@@ -952,6 +952,12 @@ def create_app(config_path: str) -> Flask:
       gap: 12px;
       margin-bottom: 12px;
     }
+    .cards-grid[data-count="2"] {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .cards-grid[data-count="1"] {
+      grid-template-columns: minmax(0, 1fr);
+    }
     .instance-card {
       background: var(--glass-bg);
       border: 1px solid var(--glass-border);
@@ -1340,7 +1346,9 @@ def create_app(config_path: str) -> Flask:
     @media (max-width: 900px) {
       .app { grid-template-columns: 1fr; }
       .sidebar { display: none; }
-      .cards-grid { grid-template-columns: 1fr; }
+      .cards-grid,
+      .cards-grid[data-count="2"],
+      .cards-grid[data-count="1"] { grid-template-columns: 1fr; }
       .settings-grid { grid-template-columns: 1fr; }
       .two-col { grid-template-columns: 1fr; }
       .auth-splash {
@@ -2291,6 +2299,7 @@ def create_app(config_path: str) -> Flask:
 
       const instances = Array.isArray(data.config?.instances) ? data.config.instances : [];
       const cards = document.getElementById('instance-cards');
+      cards.setAttribute('data-count', String(instances.length));
       cards.innerHTML = '';
       if (!instances.length) {
         cards.innerHTML = `<div class="card" style="margin:0;"><div class="section-head"><h3>No Instances Configured</h3><div class="subline">Add a Radarr or Sonarr instance from Configuration.</div></div></div>`;

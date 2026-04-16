@@ -1495,8 +1495,17 @@ def create_app(config_path: str) -> Flask:
       recentItemMetaCache.set(cacheKey, data || {});
       return data || {};
     }
-    async function hydrateRecentActionCards() {
-      const rows = Array.from(document.querySelectorAll('.recent-action-row[data-app][data-instance-id][data-item-key]'));
+    function renderActionMetaBadges(kindMeta, sourceLabel = '') {
+      const chips = [];
+      if (kindMeta.label) chips.push(`<span class="recent-action-kind recent-action-kind-${safe(kindMeta.className)}">${safe(kindMeta.label)}</span>`);
+      if (kindMeta.typeLabel) chips.push(`<span class="recent-action-kind recent-action-kind-type">${safe(kindMeta.typeLabel)}</span>`);
+      if (sourceLabel) chips.push(`<span class="recent-action-source">${safe(sourceLabel)}</span>`);
+      return chips.join('');
+    }
+    async function hydrateActionMediaRows() {
+      const rows = Array.from(document.querySelectorAll(
+        '.recent-action-row[data-app][data-instance-id][data-item-key], .history-entry[data-app][data-instance-id][data-item-key]'
+      ));
       await Promise.all(rows.map(async (row) => {
         const appType = String(row.getAttribute('data-app') || '').trim();
         const instanceId = String(row.getAttribute('data-instance-id') || '').trim();
@@ -1504,11 +1513,14 @@ def create_app(config_path: str) -> Flask:
         if (!appType || !instanceId || !itemKey) return;
         try {
           const meta = await fetchRecentActionMeta(appType, instanceId, itemKey);
-          const button = row.querySelector('.recent-action-link');
+          const button = row.querySelector('.recent-action-link, .history-entry-link');
           if (button && meta.item_url) button.setAttribute('data-item-url', String(meta.item_url));
-          const wrap = row.querySelector('.recent-action-cover-wrap');
+          const wrap = row.querySelector('.recent-action-cover-wrap, .history-entry-cover-wrap');
           if (wrap && meta.cover_url) {
-            wrap.innerHTML = `<img class="recent-action-cover" src="${String(meta.cover_url)}" alt="">`;
+            const imageClass = wrap.classList.contains('history-entry-cover-wrap')
+              ? 'history-entry-cover'
+              : 'recent-action-cover';
+            wrap.innerHTML = `<img class="${imageClass}" src="${String(meta.cover_url)}" alt="">`;
             wrap.classList.remove('is-empty');
           } else if (wrap) {
             row.classList.add('no-cover');
@@ -1609,6 +1621,13 @@ def create_app(config_path: str) -> Flask:
     function normalizeTimeFormat(value) {
       const fmt = String(value || '').trim().toLowerCase();
       return (fmt === '12h' || fmt === '12' || fmt === '12hr' || fmt === '12-hour') ? '12h' : '24h';
+    }
+    function normalizeExternalUrl(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      if (/^https?:\/\//i.test(raw)) return raw;
+      if (raw.startsWith('//')) return `${window.location.protocol}${raw}`;
+      return `${window.location.protocol}//${raw}`;
     }
     function getDateTimeParts(dt, options = {}) {
       const includeSeconds = options.includeSeconds !== false;
@@ -1919,6 +1938,10 @@ def create_app(config_path: str) -> Flask:
         const runTitle = runningThis ? 'Run in progress' : (canForce ? 'Run now' : 'Run unavailable');
         const statusHtml = statusClass === 'waiting' ? '' : `<span class="status ${statusClass}">${statusText}</span>`;
         const safeUrl = i.arr_url ? safe(i.arr_url) : 'URL not set';
+        const normalizedUrl = normalizeExternalUrl(i.arr_url);
+        const dashboardUrlHtml = normalizedUrl
+          ? `<a class="instance-link mono" href="${safe(normalizedUrl)}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>`
+          : `<span class="mono">${safeUrl}</span>`;
         cards.innerHTML += `
           <div class="instance-card instance-card-shell" data-app="${safe(i.app)}">
             <div>
@@ -1933,7 +1956,7 @@ def create_app(config_path: str) -> Flask:
                     <span class="instance-id">#${safe(i.instance_id)}</span>
                   </div>
                   <div class="instance-meta">
-                    <span class="mono">${safeUrl}</span>
+                    ${dashboardUrlHtml}
                   </div>
                 </div>
                 <div class="instance-utility">
@@ -2012,13 +2035,30 @@ def create_app(config_path: str) -> Flask:
         
         let body = '';
         for (const row of pageRows) {
-          body += `<tr>
-            <td class="mono time" title="${safe(row.occurred_at) || ''}">${fmtTime(row.occurred_at) || '-'}</td>
-            <td class="title">${safe(row.title)}</td>
-          </tr>`;
+          const appType = String(row.app_type || activeInst.app || '').trim().toLowerCase();
+          const instanceId = Number(row.instance_id || activeInst.instance_id || 0);
+          const kindMeta = actionKindMeta(row.action_kind, row.item_key);
+          const itemOpenArgs = `${JSON.stringify(appType)}, ${JSON.stringify(String(instanceId))}, ${JSON.stringify(String(row.item_key || ''))}`;
+          const rowClass = row.item_key ? 'history-entry' : 'history-entry no-cover';
+          const dateLabel = fmtTime(row.occurred_at, { includeTime: false }) || '-';
+          const timeLabel = fmtTime(row.occurred_at, { includeSeconds: false, omitDate: true }) || '';
+          body += `
+            <article class="history-list-item">
+              <div class="history-entry-stamp mono" title="${safe(fmtTime(row.occurred_at) || '')}">
+                <div class="history-time-date">${safe(dateLabel)}</div>
+                <div class="history-time-clock">${safe(timeLabel)}</div>
+              </div>
+              <div class="${rowClass}" data-app="${safe(appType)}" data-instance-id="${safe(String(instanceId))}" data-item-key="${safe(String(row.item_key || ''))}">
+                <div class="history-entry-cover-wrap${row.item_key ? '' : ' is-empty'}"></div>
+                <div class="history-entry-main">
+                  <button class="history-entry-title history-entry-link" type="button" onclick='openRecentActionItem(${itemOpenArgs}); return false;'>${safe(row.title || 'Untitled search')}</button>
+                  <div class="history-entry-meta">${renderActionMetaBadges(kindMeta)}</div>
+                </div>
+              </div>
+            </article>`;
         }
         if (!body) {
-          body = `<tr><td colspan="2" class="mono history-empty">No searches recorded yet.</td></tr>`;
+          body = `<div class="mono history-empty">No searches recorded yet.</div>`;
         }
 
         // Pagination controls
@@ -2036,19 +2076,9 @@ def create_app(config_path: str) -> Flask:
 
         contentHtml = `
           <div class="card history-card">
-            <div class="table-wrap">
-              <table class="history">
-                <colgroup>
-                  <col class="col-time" />
-                  <col />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>Time (${safe(getTimeZoneLabel())})</th><th>Title Searched</th>
-                  </tr>
-                </thead>
-                <tbody>${body}</tbody>
-              </table>
+            <div class="history-list-wrap">
+              <div class="history-list-note">Times shown in ${safe(getTimeZoneLabel())}</div>
+              <div class="history-list">${body}</div>
             </div>
             ${paginationHtml}
           </div>`;
@@ -2087,17 +2117,13 @@ def create_app(config_path: str) -> Flask:
               <div class="recent-action-time mono" title="${safe(fmtTime(a.ts) || '')}">${safe(fmtRecentActionStamp(a.ts) || '--')}</div>
               <div class="recent-action-main">
                 <button class="recent-action-title recent-action-link" type="button" onclick='openRecentActionItem(${itemOpenArgs}); return false;'>${safe(a.title || 'Untitled search')}</button>
-                <div class="recent-action-meta">
-                  ${kindMeta.label ? `<span class="recent-action-kind recent-action-kind-${safe(kindMeta.className)}">${safe(kindMeta.label)}</span>` : ''}
-                  ${kindMeta.typeLabel ? `<span class="recent-action-kind recent-action-kind-type">${safe(kindMeta.typeLabel)}</span>` : ''}
-                  <span class="recent-action-source">${safe(sourceLabel)}</span>
-                </div>
+                <div class="recent-action-meta">${renderActionMetaBadges(kindMeta, sourceLabel)}</div>
               </div>
             </div>
           `;
         }).join('');
-        hydrateRecentActionCards();
       }
+      hydrateActionMediaRows();
       tickCountdowns();
     }
     document.getElementById('instance-cards').addEventListener('click', (e) => {
@@ -2356,7 +2382,11 @@ def create_app(config_path: str) -> Flask:
                   <span>${safe(inst.app).toUpperCase()} - ${safe(instanceName)}</span>
                   <span class="settings-instance-badge">#${safe(inst.instance_id)}</span>
                 </div>
-                <div class="subline mono settings-instance-url">${safe(inst.arr_url) || '-'}</div>
+                <div class="subline mono settings-instance-url">${
+                  inst.arr_url
+                    ? `<a class="settings-instance-link" href="${safe(normalizeExternalUrl(inst.arr_url))}" target="_blank" rel="noopener noreferrer">${safe(inst.arr_url)}</a>`
+                    : '-'
+                }</div>
               </div>
               <div class="pill-row settings-toggle-group">
                 <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_enabled" name="settings_${safe(key)}_enabled" ${inst.enabled ? 'checked' : ''}> Enabled</label>

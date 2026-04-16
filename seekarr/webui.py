@@ -957,25 +957,24 @@ def create_app(config_path: str) -> Flask:
 <body class="auth-locked">
   <div class="modal auth-splash" id="auth-modal">
     <div class="modal-card auth-splash-card">
-      <div class="auth-splash-brand">
-<img src="/assets/banner.svg" alt="Seekarr banner"/>
-      </div>
       <div class="auth-panel">
-        <div class="modal-row">
-          <div class="modal-title" id="auth-title">Authentication</div>
+        <div class="auth-splash-brand">
+<img src="/assets/banner.svg" alt="Seekarr banner"/>
+        </div>
+        <div class="auth-panel-head">
+          <div class="auth-panel-copy" id="auth-sub">Enter your Web UI password.</div>
         </div>
         <div class="modal-body">
-          <div class="subline" id="auth-sub" style="margin-bottom:10px;">Enter your Web UI password.</div>
-          <div class="field">
+          <div class="field auth-field">
             <div class="label" id="auth-label">Password</div>
-            <input class="cfg mono" id="auth-password" name="seekarr_webui_password" type="password" value=""
-                   autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
-            <div class="subline" id="auth-hint" style="margin-top:6px;"></div>
+            <div class="auth-inline">
+              <input class="cfg mono" id="auth-password" name="seekarr_webui_password" type="password" value=""
+                     autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
+              <button class="btn-primary auth-submit" id="auth-submit">Continue</button>
+            </div>
+            <div class="subline auth-field-hint" id="auth-hint"></div>
           </div>
-          <div class="subline" id="auth-error" style="margin-top:10px; color: rgba(254, 202, 202, 0.98);"></div>
-        </div>
-        <div class="modal-actions">
-          <button class="btn-primary" id="auth-submit">CONTINUE</button>
+          <div class="subline auth-error" id="auth-error"></div>
         </div>
       </div>
     </div>
@@ -1269,7 +1268,6 @@ def create_app(config_path: str) -> Flask:
 
     function showAuthModal(mode) {
       const modal = document.getElementById('auth-modal');
-      const title = document.getElementById('auth-title');
       const sub = document.getElementById('auth-sub');
       const label = document.getElementById('auth-label');
       const hint = document.getElementById('auth-hint');
@@ -1288,17 +1286,17 @@ def create_app(config_path: str) -> Flask:
       }
 
       if (mode === 'set') {
-        title.textContent = 'Set Web UI Password';
-        sub.textContent = 'First run: set a password to protect Seekarr.';
+        sub.textContent = 'Create a password to secure access to the Seekarr Web UI.';
         label.textContent = 'New Password';
         pw.setAttribute('autocomplete', 'new-password');
         hint.textContent = 'Minimum 8 characters. Saved as a salted hash in the SQLite DB.';
+        btn.textContent = 'Save Password';
       } else {
-        title.textContent = 'Unlock Seekarr';
         sub.textContent = 'Enter your Web UI password to continue.';
         label.textContent = 'Password';
         pw.setAttribute('autocomplete', 'current-password');
         hint.textContent = '';
+        btn.textContent = 'Unlock';
       }
 
       document.body.classList.add('auth-locked');

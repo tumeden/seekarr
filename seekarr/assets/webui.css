@@ -1194,18 +1194,17 @@ select.cfg:focus {
 
   .auth-splash {
     padding: 20px 16px;
-    padding-top: 40px;
   }
 
   .auth-splash-card {
     width: 100%;
-    gap: 16px;
   }
 
   .auth-splash-brand {
     width: 100%;
     max-width: 100%;
-    padding: 12px;
+    padding: 0 0 14px;
+    margin-bottom: 16px;
   }
 
   .auth-splash-brand img {
@@ -1215,6 +1214,19 @@ select.cfg:focus {
   .auth-panel {
     width: 100%;
     padding: 16px;
+  }
+
+  .auth-panel-title {
+    font-size: 28px;
+  }
+
+  .auth-inline {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .auth-submit {
+    width: 100%;
   }
 
   .settings-save-fab {
@@ -1241,14 +1253,13 @@ select.cfg:focus {
 }
 
 .auth-splash {
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   background:
     radial-gradient(860px 480px at 50% 0%, rgba(249, 115, 22, 0.14), transparent 60%),
     radial-gradient(680px 340px at 50% 14%, rgba(255, 255, 255, 0.03), transparent 70%),
     linear-gradient(180deg, rgba(8, 9, 11, 0.985), rgba(4, 5, 7, 0.995));
   padding: 32px 20px;
-  padding-top: 48px;
 }
 
 .modal-card {
@@ -1287,11 +1298,7 @@ select.cfg:focus {
 }
 
 .auth-splash-card {
-  width: min(680px, 100%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 22px;
+  width: min(560px, 100%);
   background: transparent;
   border: 0;
   box-shadow: none;
@@ -1300,48 +1307,59 @@ select.cfg:focus {
 
 .auth-splash-brand {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: min(520px, 100%);
-  padding: 18px;
-  border-radius: 24px;
-  border: 1px solid rgba(249, 115, 22, 0.16);
-  background:
-    radial-gradient(420px 180px at 16% 8%, rgba(255, 255, 255, 0.05), transparent 62%),
-    linear-gradient(180deg, rgba(20, 22, 28, 0.94), rgba(10, 11, 14, 0.98));
-  box-shadow:
-    0 18px 46px rgba(0, 0, 0, 0.36),
-    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
-    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  width: 100%;
+  padding: 0 0 14px;
+  margin-bottom: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .auth-splash-brand img {
-  width: min(100%, 468px);
+  width: min(100%, 432px);
   height: auto;
   display: block;
-  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.2));
+  filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.18));
 }
 
 .auth-panel {
   width: 100%;
-  padding: 20px 20px 18px 20px;
-  border-radius: 22px;
+  padding: 20px 22px 18px;
+  border-radius: 24px;
   border: 1px solid rgba(249, 115, 22, 0.12);
-  background: linear-gradient(180deg, rgba(14, 16, 20, 0.96), rgba(8, 10, 14, 0.985));
+  background:
+    radial-gradient(560px 220px at 12% 0%, rgba(255, 255, 255, 0.04), transparent 58%),
+    linear-gradient(180deg, rgba(14, 16, 20, 0.97), rgba(8, 10, 14, 0.99));
   box-shadow:
     0 18px 48px rgba(0, 0, 0, 0.36),
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
-.auth-panel .modal-title {
-  font-size: 14px;
-  color: #f8fafc;
-  letter-spacing: 0.04em;
+.auth-panel-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  align-items: flex-start;
+  max-width: 360px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.auth-panel-copy {
+  max-width: 42ch;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
 }
 
 .auth-panel .modal-body {
-  margin-top: 14px;
+  margin-top: 16px;
+  max-width: 360px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
 }
 
 .auth-panel .subline {
@@ -1349,13 +1367,48 @@ select.cfg:focus {
   line-height: 1.5;
 }
 
-.auth-panel input.cfg {
-  height: 42px;
-  background: rgba(15, 23, 42, 0.42);
+.auth-field {
+  gap: 6px;
+  max-width: none;
 }
 
-.auth-panel .modal-actions {
-  margin-top: 16px;
+.auth-inline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.auth-panel input.cfg {
+  height: 42px;
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 11px;
+}
+
+.auth-field-hint {
+  color: var(--text-muted);
+}
+
+.auth-field-hint:empty {
+  display: none;
+}
+
+.auth-error {
+  margin-top: 8px;
+  color: rgba(254, 202, 202, 0.98);
+}
+
+.auth-error:empty {
+  display: none;
+}
+
+.auth-submit {
+  width: auto;
+  min-width: 118px;
+  min-height: 42px;
+  padding-inline: 16px;
+  font-size: 12px;
+  border-radius: 11px;
 }
 
 .btn-primary {

@@ -22,8 +22,8 @@
 Seekarr automatically triggers Radarr/Sonarr searches for monitored items in your library, with scheduling, cooldowns, and rate limits.
 
 <!-- screenshots -->
-<img width="1129" height="515" alt="image" src="https://github.com/user-attachments/assets/f754e7dc-5bb7-4f13-9b42-3b3b6fb495ae" />
-<img width="1474" height="529" alt="Seekarr dashboard" src="https://github.com/user-attachments/assets/85993bc0-6466-4349-9a82-df99ef89a818" />
+<img width="1095" height="708" alt="image" src="https://github.com/user-attachments/assets/79c854f6-c56b-47c1-9737-fcf4ec551ac9" />
+<img width="1446" height="897" alt="image" src="https://github.com/user-attachments/assets/1bcfe1b1-bba1-4e4c-a889-2d615d2749a7" />
 <img width="1400" height="774" alt="image" src="https://github.com/user-attachments/assets/8da3fdd8-b83b-4bb2-9400-a58499e127bf" />
 
 ---

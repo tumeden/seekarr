@@ -164,6 +164,7 @@ def _is_newer_version(current: str, latest: str) -> bool:
 
 def create_app(config_path: str) -> Flask:
     config_path = str(Path(config_path).resolve())
+    project_dir = Path(__file__).resolve().parent.parent
     base_config = load_config(config_path)
     setup_logging(base_config.app.log_level)
     logger = logging.getLogger("seekarr.webui")
@@ -414,7 +415,7 @@ def create_app(config_path: str) -> Flask:
     }
     current_version = "dev"
     try:
-        with open(Path(__file__).resolve().parent.parent / "version.txt", "r", encoding="utf-8") as f:
+        with open(project_dir / "version.txt", "r", encoding="utf-8") as f:
             v_text = f.read().strip()
             if v_text:
                 current_version = v_text
@@ -431,6 +432,7 @@ def create_app(config_path: str) -> Flask:
         "update_available": False,
         "checked_at_epoch": 0.0,
     }
+    asset_cache_key = current_version
 
     def _refresh_version_state() -> None:
         now = time.time()
@@ -468,13 +470,13 @@ def create_app(config_path: str) -> Flask:
 
     app = Flask(__name__)
     assets_dir = Path(__file__).resolve().parent / "assets"
-    repo_assets_dir = Path(__file__).resolve().parent.parent
+    project_assets_dir = project_dir
 
     def _asset_path(name: str) -> Path:
         bundled = assets_dir / name
         if bundled.exists():
             return bundled
-        fallback = repo_assets_dir / name
+        fallback = project_assets_dir / name
         return fallback
 
     password_hash = store.get_webui_password_hash()
@@ -770,851 +772,13 @@ def create_app(config_path: str) -> Flask:
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      /* Seekarr: modern dark theme */
-      --bg-primary: #090a0c;
-      --bg-secondary: #111318;
-      --bg-tertiary: #181b21;
-      --text-primary: #f8fafc;
-      --text-secondary: #e2e8f0;
-      --text-muted: #94a3b8;
-      --accent-color: #f97316; /* orange */
-      --accent-hover: #fb923c;
-      --success-color: #22c55e;
-      --warning-color: #f59e0b;
-      --error-color: #ef4444;
-      --glass-bg: rgba(17, 19, 24, 0.65);
-      --glass-border: rgba(249, 115, 22, 0.12);
-      --radius-md: 10px;
-      --radius-lg: 14px;
-      --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    * { box-sizing: border-box; }
-    html, body {
-      margin: 0;
-      height: 100%;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      -webkit-font-smoothing: antialiased;
-    }
-    body.auth-locked {
-      overflow: hidden;
-      background:
-        radial-gradient(960px 540px at 14% 10%, rgba(249, 115, 22, 0.14), transparent 58%),
-        radial-gradient(920px 520px at 88% 16%, rgba(251, 146, 60, 0.10), transparent 55%),
-        linear-gradient(180deg, #0b0d11, #050608);
-    }
-    body.auth-locked .app,
-    body.auth-locked .settings-save-fab {
-      display: none;
-    }
-
-    .app {
-      display: grid;
-      grid-template-columns: 220px 1fr;
-      min-height: 100vh;
-    }
-    .sidebar {
-      background: linear-gradient(180deg, rgba(11, 11, 12, 0.98), rgba(8, 8, 9, 0.98));
-      border-right: 1px solid rgba(249, 115, 22, 0.14);
-      padding: 18px 14px;
-    }
-    .brand {
-      font-weight: 800;
-      font-size: 16px;
-      letter-spacing: .3px;
-      color: #fff;
-      margin-bottom: 14px;
-    }
-    .nav-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      text-decoration: none;
-      color: var(--text-muted);
-      padding: 10px 14px;
-      margin-bottom: 6px;
-      border-radius: 8px;
-      font-weight: 500;
-      font-size: 14px;
-      background: transparent;
-      border: 1px solid transparent;
-      border-left: 3px solid transparent;
-      transition: var(--transition);
-    }
-    .nav-item svg {
-      width: 18px;
-      height: 18px;
-      opacity: 0.7;
-      transition: var(--transition);
-    }
-    .nav-item:hover {
-      background: rgba(255, 255, 255, 0.03);
-      color: var(--text-secondary);
-    }
-    .nav-item:hover svg {
-      opacity: 1;
-    }
-    .nav-item.active {
-      color: #fff;
-      background: linear-gradient(90deg, rgba(249, 115, 22, 0.15), transparent);
-      border-left: 3px solid var(--accent-color);
-    }
-    .nav-item.active svg {
-      color: var(--accent-color);
-      opacity: 1;
-    }
-    .sidebar-badges {
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px solid rgba(249, 115, 22, 0.14);
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .sidebar-badge {
-      display: inline-block;
-      text-decoration: none;
-      color: var(--text-secondary);
-      font-size: 11px;
-      font-weight: 700;
-      padding: 5px 8px;
-      border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.10);
-      background: rgba(15, 23, 42, 0.45);
-    }
-    .sidebar-badge:hover {
-      border-color: rgba(249, 115, 22, 0.35);
-      color: #fff;
-    }
-    .sidebar-badge.update {
-      border-color: rgba(245, 158, 11, 0.35);
-      background: rgba(245, 158, 11, 0.14);
-      color: rgba(253, 230, 138, 0.98);
-    }
-    .sidebar-badge.update:hover {
-      border-color: rgba(245, 158, 11, 0.55);
-    }
-    .main { min-width: 0; display: flex; flex-direction: column; }
-    .hero-banner {
-      padding: 10px 16px 0 16px;
-    }
-    .hero-banner img {
-      width: min(760px, 100%);
-      height: auto;
-      border-radius: 12px;
-      border: 1px solid rgba(249, 115, 22, 0.16);
-      display: block;
-    }
-    
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-muted);
-      background: rgba(30, 41, 59, 0.6);
-      border: 1px solid rgba(148, 163, 184, 0.2);
-      border-radius: 999px;
-      padding: 4px 10px;
-    }
-    .content-section { display: none; padding: 16px; }
-    .content-section.active { display: block; }
-    .actions {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 14px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-    button {
-      border: 0;
-      border-radius: 8px;
-      cursor: pointer;
-      padding: 9px 16px;
-      font-weight: 600;
-      color: #fff;
-      transition: var(--transition);
-    }
-    button:active {
-      transform: scale(0.97);
-    }
-    #run { background: var(--accent-color); }
-    #run:hover { background: var(--accent-hover); }
-    #runforce { background: var(--warning-color); color: #121212; }
-    #runforce:hover { filter: brightness(1.08); }
-    #msg { color: var(--text-muted); font-size: 13px; }
-    .cards-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 12px;
-      margin-bottom: 12px;
-    }
-    .cards-grid[data-count="2"] {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    .cards-grid[data-count="1"] {
-      grid-template-columns: minmax(0, 1fr);
-    }
-    .instance-card {
-      background: var(--glass-bg);
-      border: 1px solid var(--glass-border);
-      border-radius: var(--radius-lg);
-      padding: 12px;
-    }
-    .instance-head {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 14px;
-      margin-bottom: 10px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid rgba(71, 85, 105, 0.35);
-    }
-    .instance-main { min-width: 0; flex: 1; }
-    .instance-eyebrow {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--text-muted);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      font-weight: 700;
-      margin-bottom: 10px;
-    }
-    .instance-title {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: baseline;
-      gap: 10px;
-      font-weight: 700;
-      color: var(--text-secondary);
-      font-size: 14px;
-      min-width: 0;
-    }
-    .instance-name {
-      color: var(--text-primary);
-      font-size: 28px;
-      line-height: 1;
-      font-weight: 800;
-      letter-spacing: -.03em;
-      min-width: 0;
-      overflow-wrap: anywhere;
-    }
-    .instance-id {
-      color: var(--text-muted);
-      font-size: 13px;
-      font-weight: 700;
-      white-space: nowrap;
-    }
-    .instance-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px 10px;
-      margin-top: 10px;
-      color: var(--text-muted);
-      font-size: 12px;
-      line-height: 1.4;
-    }
-    .instance-meta .dot {
-      opacity: 0.5;
-    }
-    .instance-actions {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 8px;
-      flex-shrink: 0;
-    }
-    .instance-actions-row {
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .pill-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-    .big-countdown {
-      font-size: 30px;
-      font-weight: 800;
-      color: var(--text-primary);
-      letter-spacing: 0.3px;
-      margin: 6px 0 10px 0;
-    }
-    .subline { color: var(--text-muted); font-size: 12px; }
-    .kv {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-top: 10px;
-    }
-    .kv .k {
-      color: var(--text-muted);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: .04em;
-    }
-    .kv .v { color: var(--text-secondary); font-size: 13px; margin-top: 3px; }
-    .stat {
-      background: var(--glass-bg);
-      border: 1px solid var(--glass-border);
-      border-radius: var(--radius-md);
-      padding: 10px;
-    }
-    .stat-label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-    .stat-value { margin-top: 4px; font-size: 22px; font-weight: 700; color: var(--text-secondary); }
-    .field { display: block; }
-    .info-icon {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 16px;
-      height: 16px;
-      margin-left: 6px;
-      vertical-align: middle;
-      color: var(--accent-color);
-      cursor: help;
-      opacity: 0.7;
-      transition: opacity 0.2s, transform 0.2s;
-    }
-    .info-icon:hover { 
-      opacity: 1;
-      transform: scale(1.1);
-    }
-    .card {
-      background: var(--glass-bg);
-      border: 1px solid var(--glass-border);
-      border-radius: var(--radius-lg);
-      padding: 12px;
-      margin-bottom: 12px;
-    }
-    .card h3 { margin: 0 0 10px 0; font-size: 14px; color: var(--text-secondary); }
-    .section-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-    }
-    .section-head h3 {
-      margin: 0;
-      font-size: 14px;
-      color: var(--text-secondary);
-    }
-    .section-head .subline {
-      font-size: 12px;
-    }
-    .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); white-space: nowrap; transition: background 0.2s; }
-    tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
-    th { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
-    td { color: var(--text-secondary); }
-    .mono { font-family: Consolas, monospace; }
-
-    /* Search history tables: fixed time column, wrapping titles for consistent alignment. */
-    table.history { table-layout: fixed; }
-    table.history col.col-time { width: 200px; }
-    table.history td.time { white-space: nowrap; }
-    table.history td.title { white-space: normal; overflow-wrap: anywhere; }
-    .badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 700;
-    }
-    .ok { background: rgba(34, 197, 94, 0.18); color: var(--success-color); }
-    .off { background: rgba(239, 68, 68, 0.18); color: var(--error-color); }
-    .warn { background: rgba(245, 158, 11, 0.2); color: var(--warning-color); }
-
-    /* UI refresh (no framework) */
-    body {
-      background:
-        radial-gradient(900px 520px at 12% 10%, rgba(249, 115, 22, 0.12), transparent 60%),
-        radial-gradient(900px 520px at 86% 18%, rgba(34, 197, 94, 0.08), transparent 55%),
-        linear-gradient(180deg, var(--bg-primary), #050505);
-    }
-    .sidebar {
-      background: linear-gradient(180deg, rgba(14, 16, 20, 0.8), rgba(9, 10, 12, 0.9));
-      backdrop-filter: blur(16px);
-    }
-    .topbar {
-      background: linear-gradient(180deg, rgba(16, 17, 19, 0.82), rgba(10, 10, 11, 0.92));
-      backdrop-filter: blur(10px);
-    }
-    .stat, .card, .instance-card {
-      box-shadow:
-        0 10px 28px rgba(0, 0, 0, 0.38),
-        inset 0 1px 0 rgba(255, 255, 255, 0.03);
-    }
-    .instance-card {
-      position: relative;
-      overflow: hidden;
-      padding: 16px;
-      border-color: rgba(255, 255, 255, 0.04);
-      background:
-        radial-gradient(520px 220px at 12% 8%, rgba(255, 255, 255, 0.04), transparent 55%),
-        var(--glass-bg);
-      backdrop-filter: blur(12px);
-      transition: var(--transition);
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-    }
-    .instance-card:hover {
-      transform: translateY(-3px);
-      border-color: rgba(249, 115, 22, 0.3);
-      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4), 0 0 15px rgba(249, 115, 22, 0.1);
-    }
-    /* Keep per-app accents but stay within the orange brand. */
-    .instance-card[data-app="radarr"] { --accent-app: rgba(249, 115, 22, 0.92); }
-    .instance-card[data-app="sonarr"] { --accent-app: rgba(251, 146, 60, 0.92); }
-    .instance-card::before {
-      content: "";
-      position: absolute;
-      left: 0;
-      top: 0;
-      height: 3px;
-      width: 100%;
-      background: linear-gradient(90deg, var(--accent-app, rgba(249, 115, 22, 0.85)), transparent 70%);
-      opacity: 0.9;
-    }
-    .big-countdown {
-      font-size: 34px;
-      margin: 10px 0 8px 0;
-      font-variant-numeric: tabular-nums;
-    }
-    .big-countdown.due {
-      color: #fca5a5;
-      text-shadow: 0 0 18px rgba(239, 68, 68, 0.2);
-    }
-    .subline.warn {
-      color: rgba(251, 191, 36, 0.95);
-    }
-    .progress {
-      height: 8px;
-      border-radius: 999px;
-      background: rgba(148, 163, 184, 0.14);
-      overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.05);
-    }
-    .progress > .bar {
-      height: 100%;
-      width: 0%;
-      border-radius: 999px;
-      /* Match the instance accent color (radarr/sonarr) instead of a random multi-color gradient. */
-      background: var(--accent-app, rgba(249, 115, 22, 0.9));
-      transition: width 120ms ease;
-    }
-    .progress > .bar.cap {
-      background: rgba(239, 68, 68, 0.92);
-    }
-    .status {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 3px 9px;
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: .02em;
-      border: 1px solid rgba(255, 255, 255, 0.10);
-      background: rgba(148, 163, 184, 0.12);
-      color: rgba(226, 232, 240, 0.95);
-    }
-    .status.running { border-color: rgba(245, 158, 11, 0.35); background: rgba(245, 158, 11, 0.18); color: rgba(253, 230, 138, 0.98); }
-    .status.due { border-color: rgba(239, 68, 68, 0.30); background: rgba(239, 68, 68, 0.16); color: rgba(254, 202, 202, 0.98); }
-    .status.off { border-color: rgba(239, 68, 68, 0.25); background: rgba(239, 68, 68, 0.10); color: rgba(254, 202, 202, 0.90); }
-    #recent-actions { white-space: pre-wrap; line-height: 1.35; max-height: 180px; overflow: auto; }
-    .btn-mini {
-      border: 1px solid rgba(255, 255, 255, 0.10);
-      background: rgba(239, 68, 68, 0.16);
-      border-color: rgba(239, 68, 68, 0.28);
-      color: rgba(254, 202, 202, 0.98);
-      padding: 5px 10px;
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: .02em;
-      cursor: pointer;
-    }
-    .btn-mini:hover { border-color: rgba(239, 68, 68, 0.52); background: rgba(239, 68, 68, 0.22); }
-    .btn-mini:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-mini.force {
-      background: rgba(239, 68, 68, 0.16);
-      border-color: rgba(239, 68, 68, 0.28);
-      color: rgba(254, 202, 202, 0.98);
-    }
-    .btn-mini.force:hover {
-      border-color: rgba(239, 68, 68, 0.52);
-      background: rgba(239, 68, 68, 0.22);
-    }
-    .settings-grid {
-      grid-template-columns: repeat(2, minmax(340px, 1fr));
-    }
-    .field {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin-top: 10px;
-    }
-    .field:first-child { margin-top: 0; }
-    .field .label {
-      color: var(--text-muted);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: .04em;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    input.cfg, select.cfg {
-      width: 100%;
-      padding: 9px 10px;
-      height: 38px;
-      line-height: 18px;
-      font: inherit;
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.10);
-      background: rgba(15, 23, 42, 0.55);
-      color: var(--text-secondary);
-      outline: none;
-    }
-    input.cfg:focus, select.cfg:focus {
-      border-color: rgba(249, 115, 22, 0.45);
-      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.16);
-    }
-    .inline-input {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-    .inline-input > input.cfg { flex: 1; }
-    .icon-btn {
-      width: 38px;
-      height: 38px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.10);
-      background: rgba(15, 23, 42, 0.55);
-      color: rgba(226, 232, 240, 0.95);
-      padding: 0;
-      cursor: pointer;
-    }
-    .icon-btn:hover { border-color: rgba(249, 115, 22, 0.35); }
-    .icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .icon-btn.danger {
-      border-color: rgba(239, 68, 68, 0.30);
-      background: rgba(239, 68, 68, 0.12);
-      color: rgba(254, 202, 202, 0.98);
-    }
-    .icon-btn.danger:hover { border-color: rgba(239, 68, 68, 0.55); background: rgba(239, 68, 68, 0.18); }
-    .icon-btn svg { width: 16px; height: 16px; }
-    .tog {
-      display: inline-flex;
-      gap: 8px;
-      align-items: center;
-      user-select: none;
-    }
-    .tog input[type="checkbox"] { transform: translateY(1px); }
-    .two-col {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      align-items: start;
-    }
-    /* In a two-column row, both columns should align to the same top edge. */
-    .two-col .field { margin-top: 0; }
-    @media (max-width: 1500px) {
-      .cards-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    }
-    @media (max-width: 1150px) {
-      .instance-head { flex-direction: column; }
-      .instance-actions {
-        width: 100%;
-        align-items: flex-start;
-      }
-      .instance-actions-row {
-        justify-content: flex-start;
-      }
-    }
-    @media (max-width: 900px) {
-      .app { grid-template-columns: 1fr; }
-      .sidebar { display: none; }
-      .cards-grid,
-      .cards-grid[data-count="2"],
-      .cards-grid[data-count="1"] { grid-template-columns: 1fr; }
-      .settings-grid { grid-template-columns: 1fr; }
-      .two-col { grid-template-columns: 1fr; }
-      .auth-splash {
-        padding: 20px 16px;
-        padding-top: 40px;
-      }
-      .auth-splash-card {
-        width: 100%;
-        gap: 16px;
-      }
-      .auth-splash-brand {
-        width: 100%;
-        max-width: 100%;
-        padding: 12px;
-      }
-      .auth-splash-brand img {
-        width: 100%;
-      }
-      .auth-panel {
-        width: 100%;
-        padding: 16px;
-      }
-      .settings-save-fab {
-        left: 16px;
-        right: 16px;
-        bottom: 16px;
-        justify-content: space-between;
-      }
-    }
-
-    .modal {
-      position: fixed;
-      inset: 0;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      background: rgba(0,0,0,.55);
-      z-index: 1000;
-      padding: 18px;
-    }
-    .modal.show { display: flex; }
-    .auth-splash {
-      align-items: flex-start;
-      justify-content: center;
-      background:
-        radial-gradient(860px 480px at 50% 0%, rgba(249, 115, 22, 0.14), transparent 60%),
-        radial-gradient(680px 340px at 50% 14%, rgba(255, 255, 255, 0.03), transparent 70%),
-        linear-gradient(180deg, rgba(8, 9, 11, 0.985), rgba(4, 5, 7, 0.995));
-      padding: 32px 20px;
-      padding-top: 48px;
-    }
-    .modal-card {
-      width: min(520px, 100%);
-      background: linear-gradient(180deg, rgba(20, 22, 27, 0.985), rgba(10, 11, 14, 0.995));
-      border: 1px solid rgba(255,255,255,.08);
-      border-radius: 14px;
-      box-shadow: 0 18px 60px rgba(0,0,0,.55);
-      padding: 14px;
-    }
-    .modal-row { display:flex; justify-content:space-between; align-items:center; gap:12px; }
-    .modal-title { font-weight: 800; letter-spacing:.06em; text-transform: uppercase; color: var(--text-secondary); font-size: 13px; }
-    .modal-body { margin-top: 12px; }
-    .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top: 12px; }
-    .auth-splash-card {
-      width: min(680px, 100%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 22px;
-      background: transparent;
-      border: 0;
-      box-shadow: none;
-      padding: 0;
-    }
-    .auth-splash-brand {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      width: min(520px, 100%);
-      padding: 18px;
-      border-radius: 24px;
-      border: 1px solid rgba(249, 115, 22, 0.16);
-      background:
-        radial-gradient(420px 180px at 16% 8%, rgba(255,255,255,0.05), transparent 62%),
-        linear-gradient(180deg, rgba(20, 22, 28, 0.94), rgba(10, 11, 14, 0.98));
-      box-shadow:
-        0 18px 46px rgba(0,0,0,0.36),
-        0 0 0 1px rgba(255,255,255,0.02) inset,
-        inset 0 1px 0 rgba(255,255,255,0.03);
-    }
-    .auth-splash-brand img {
-      width: min(100%, 468px);
-      height: auto;
-      display: block;
-      filter: drop-shadow(0 12px 28px rgba(0,0,0,0.2));
-    }
-    .auth-panel {
-      width: 100%;
-      padding: 20px 20px 18px 20px;
-      border-radius: 22px;
-      border: 1px solid rgba(249, 115, 22, 0.12);
-      background:
-        linear-gradient(180deg, rgba(14, 16, 20, 0.96), rgba(8, 10, 14, 0.985));
-      box-shadow:
-        0 18px 48px rgba(0,0,0,0.36),
-        inset 0 1px 0 rgba(255,255,255,0.03);
-    }
-    .auth-panel .modal-title {
-      font-size: 14px;
-      color: #f8fafc;
-      letter-spacing: .04em;
-    }
-    .auth-panel .modal-body {
-      margin-top: 14px;
-    }
-    .auth-panel .subline {
-      font-size: 13px;
-      line-height: 1.5;
-    }
-    .auth-panel input.cfg {
-      height: 42px;
-      background: rgba(15, 23, 42, 0.42);
-    }
-    .auth-panel .modal-actions {
-      margin-top: 16px;
-    }
-    .btn-primary {
-      border: 1px solid rgba(255, 255, 255, 0.10);
-      background: linear-gradient(180deg, rgba(249, 115, 22, 0.95), rgba(234, 88, 12, 0.88));
-      color: #0b0d12;
-      padding: 9px 12px;
-      border-radius: 10px;
-      font-weight: 900;
-      letter-spacing: .06em;
-      cursor: pointer;
-    }
-    .btn-primary:disabled { opacity:.55; cursor:not-allowed; }
-    .btn-secondary {
-      border: 1px solid rgba(255, 255, 255, 0.10);
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--text-primary);
-      padding: 10px 14px;
-      border-radius: 10px;
-      font-weight: 700;
-      letter-spacing: .03em;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      white-space: nowrap;
-    }
-    .btn-secondary:hover {
-      border-color: rgba(249, 115, 22, 0.35);
-      background: rgba(249, 115, 22, 0.08);
-    }
-    .btn-danger {
-      border: 1px solid rgba(239, 68, 68, 0.32);
-      background: linear-gradient(180deg, rgba(127, 29, 29, 0.95), rgba(153, 27, 27, 0.9));
-      color: #fee2e2;
-      padding: 10px 14px;
-      border-radius: 10px;
-      font-weight: 800;
-      letter-spacing: .04em;
-      cursor: pointer;
-    }
-    .btn-danger:hover {
-      border-color: rgba(248, 113, 113, 0.45);
-      background: linear-gradient(180deg, rgba(153, 27, 27, 0.98), rgba(185, 28, 28, 0.92));
-    }
-    .btn-danger:disabled { opacity:.55; cursor:not-allowed; }
-    .settings-head {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 16px;
-      flex-wrap: wrap;
-    }
-    .settings-actions {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-    .settings-save-fab {
-      position: fixed;
-      right: 24px;
-      bottom: 24px;
-      z-index: 950;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 14px;
-      border-radius: 16px;
-      background: rgba(9, 10, 12, 0.92);
-      border: 1px solid rgba(249, 115, 22, 0.18);
-      box-shadow: 0 16px 40px rgba(0,0,0,0.45);
-      backdrop-filter: blur(14px);
-      opacity: 0;
-      pointer-events: none;
-      transform: translateY(18px);
-      transition: opacity 0.2s ease, transform 0.2s ease;
-      max-width: min(420px, calc(100vw - 32px));
-    }
-    .settings-save-fab.show {
-      opacity: 1;
-      pointer-events: auto;
-      transform: translateY(0);
-    }
-    .settings-save-fab .subline {
-      margin: 0;
-      min-width: 0;
-    }
-    .toast-stack {
-      position: fixed;
-      right: 24px;
-      bottom: 96px;
-      z-index: 980;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 10px;
-      pointer-events: none;
-      max-width: min(360px, calc(100vw - 32px));
-    }
-    .toast {
-      min-width: 240px;
-      padding: 12px 14px;
-      border-radius: 14px;
-      border: 1px solid rgba(249, 115, 22, 0.16);
-      background: linear-gradient(180deg, rgba(16, 18, 24, 0.98), rgba(9, 10, 12, 0.995));
-      color: var(--text-primary);
-      box-shadow: 0 18px 40px rgba(0,0,0,0.34);
-      transform: translateY(10px);
-      opacity: 0;
-      transition: opacity 0.18s ease, transform 0.18s ease;
-    }
-    .toast.show {
-      opacity: 1;
-      transform: translateY(0);
-    }
-    .toast.success {
-      border-color: rgba(34, 197, 94, 0.26);
-      box-shadow: 0 18px 40px rgba(0,0,0,0.34), 0 0 0 1px rgba(34, 197, 94, 0.06) inset;
-    }
-    .toast-title {
-      font-size: 12px;
-      font-weight: 800;
-      letter-spacing: .05em;
-      text-transform: uppercase;
-      color: var(--text-secondary);
-      margin-bottom: 4px;
-    }
-    .toast-text {
-      font-size: 13px;
-      line-height: 1.45;
-      color: var(--text-primary);
-    }
-  </style>
+  <link rel="stylesheet" href="/assets/webui.css?v=__ASSET_CACHE_KEY__"/>
 </head>
 <body class="auth-locked">
   <div class="modal auth-splash" id="auth-modal">
     <div class="modal-card auth-splash-card">
       <div class="auth-splash-brand">
-        <img src="/branding/banner.svg" alt="Seekarr banner"/>
+<img src="/assets/banner.svg" alt="Seekarr banner"/>
       </div>
       <div class="auth-panel">
         <div class="modal-row">
@@ -1675,20 +839,20 @@ def create_app(config_path: str) -> Flask:
 
   <div class="app">
     <aside class="sidebar">
-      <div class="brand" style="display: flex; align-items: center; gap: 8px; font-size: 18px; margin-bottom: 24px;">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        Seekarr
+      <div class="brand">
+        <svg class="brand-mark" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <span class="brand-wordmark">Seekarr</span>
       </div>
-      <a class="nav-item active" data-section="dashboard" href="#">
+      <a class="nav-item nav-control active" data-section="dashboard" href="#">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
         Dashboard
       </a>
 
-      <a class="nav-item" data-section="runs" href="#">
+      <a class="nav-item nav-control" data-section="runs" href="#">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
         History
       </a>
-      <a class="nav-item" data-section="settings" href="#">
+      <a class="nav-item nav-control" data-section="settings" href="#">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         Configuration
       </a>
@@ -1701,17 +865,28 @@ def create_app(config_path: str) -> Flask:
       </div>
     </aside>
     <main class="main">
-      <div class="hero-banner">
-        <img src="/branding/banner.svg" alt="Seekarr banner"/>
+      <div class="mobile-nav" aria-label="Sections">
+        <button class="mobile-nav-item nav-control active" data-section="dashboard" type="button">Dashboard</button>
+        <button class="mobile-nav-item nav-control" data-section="runs" type="button">History</button>
+        <button class="mobile-nav-item nav-control" data-section="settings" type="button">Configuration</button>
       </div>
       
       <section class="content-section active" id="section-dashboard">
-        <div class="actions">
-          <label class="chip" style="gap:8px; cursor:pointer;">
-            <input id="autorun-toggle" type="checkbox" style="accent-color: var(--accent-color);" checked />
-            Auto-run
-          </label>
-          <span id="msg"></span>
+        <div class="dashboard-header">
+          <div class="dashboard-brand">
+            <img src="/assets/logo.svg" alt="Seekarr logo" class="dashboard-brand-logo"/>
+            <div class="dashboard-brand-copy">
+              <h1>Seekarr</h1>
+              <div class="dashboard-brand-tagline">Missing + upgrade search automation</div>
+            </div>
+          </div>
+          <div class="actions dashboard-actions">
+            <label class="chip toggle-chip">
+              <input id="autorun-toggle" type="checkbox" checked />
+              Auto-run
+            </label>
+            <span id="msg"></span>
+          </div>
         </div>
 
         <div class="cards-grid" id="instance-cards"></div>
@@ -1736,7 +911,7 @@ def create_app(config_path: str) -> Flask:
 
       <section class="content-section" id="section-settings">
         <div class="settings-head">
-          <div id="settings-tabs" style="display:flex; gap:8px; flex-wrap:wrap;"></div>
+          <div class="settings-tabs" id="settings-tabs"></div>
           <div class="settings-actions">
             <button class="btn-secondary" id="add-radarr-instance" type="button">
             + Add Radarr Instance
@@ -1748,20 +923,20 @@ def create_app(config_path: str) -> Flask:
         </div>
         
         <div id="settings-content-wrapper">
-          <div class="card settings-tab-content" id="settings-tab-global" style="margin-top:0; padding:20px;">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
-              <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px; height:20px;"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-              <h3 style="margin:0; font-size:16px;">Global Configuration</h3>
+          <div class="card settings-tab-content settings-global-card" id="settings-tab-global">
+            <div class="settings-global-head">
+              <svg class="settings-global-icon" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+              <h3>Global Configuration</h3>
             </div>
-            <div class="subline" style="font-size:13px; margin-bottom:24px;">App-wide settings affecting all instances.</div>
+            <div class="subline settings-global-copy">App-wide settings affecting all instances.</div>
             
-            <div class="field" style="margin-top:16px; max-width:400px;">
+            <div class="field settings-global-field">
               <div class="label">Quiet Hours Timezone</div>
               <input id="settings-quiet-timezone" class="cfg mono" type="text" list="timezone-options"
                      placeholder="Search timezone (example: America/New_York)"/>
               <datalist id="timezone-options"></datalist>
             </div>
-            <div class="subline" style="margin-top:6px;">
+            <div class="subline settings-global-help">
               Used for quiet start/end evaluation. Leave empty to use server/container local timezone.
             </div>
           </div>
@@ -1773,7 +948,7 @@ def create_app(config_path: str) -> Flask:
   </div>
   <div class="settings-save-fab" id="settings-save-fab">
     <span class="subline" id="settings-msg"></span>
-    <button class="btn-primary" id="save-settings" type="button" style="padding:10px 24px; font-size:14px; box-shadow: 0 4px 12px rgba(249, 115, 22, 0.2);">SAVE CONFIGURATION</button>
+    <button class="btn-primary save-button" id="save-settings" type="button">SAVE CONFIGURATION</button>
   </div>
   <div class="toast-stack" id="toast-stack"></div>
   <script>
@@ -2162,10 +1337,10 @@ def create_app(config_path: str) -> Flask:
     function setSection(name) {
       document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
       document.getElementById(`section-${name}`)?.classList.add('active');
-      document.querySelectorAll('.nav-item').forEach(a => a.classList.remove('active'));
-      document.querySelector(`.nav-item[data-section=\"${name}\"]`)?.classList.add('active');
+      document.querySelectorAll('.nav-control').forEach(a => a.classList.remove('active'));
+      document.querySelectorAll(`.nav-control[data-section="${name}"]`).forEach(a => a.classList.add('active'));
     }
-    document.querySelectorAll('.nav-item').forEach(a => {
+    document.querySelectorAll('.nav-control').forEach(a => {
       a.addEventListener('click', (e) => {
         e.preventDefault();
         setSection(a.dataset.section);
@@ -2302,7 +1477,7 @@ def create_app(config_path: str) -> Flask:
       cards.setAttribute('data-count', String(instances.length));
       cards.innerHTML = '';
       if (!instances.length) {
-        cards.innerHTML = `<div class="card" style="margin:0;"><div class="section-head"><h3>No Instances Configured</h3><div class="subline">Add a Radarr or Sonarr instance from Configuration.</div></div></div>`;
+        cards.innerHTML = `<div class="card empty-state-card"><div class="section-head"><h3>No Instances Configured</h3><div class="subline">Add a Radarr or Sonarr instance from Configuration.</div></div></div>`;
       }
       for (const i of instances) {
         const key = `${i.app}:${i.instance_id}`;
@@ -2319,16 +1494,16 @@ def create_app(config_path: str) -> Flask:
           rs.active_app_type === i.app &&
           Number(rs.active_instance_id) === Number(i.instance_id);
 
-        let statusText = 'WAIT';
-        let statusClass = '';
+        let statusText = 'Waiting';
+        let statusClass = 'waiting';
         if (!i.enabled) {
-          statusText = 'OFF';
+          statusText = 'Off';
           statusClass = 'off';
         } else if (runningThis) {
-          statusText = 'RUNNING';
+          statusText = 'Running';
           statusClass = 'running';
         } else if (due) {
-          statusText = 'DUE';
+          statusText = 'Due';
           statusClass = 'due';
         }
 
@@ -2342,14 +1517,16 @@ def create_app(config_path: str) -> Flask:
         const barClass = (used >= cap && cap > 0) ? 'bar cap' : 'bar';
         const canForce = !!i.enabled;
         const disabledAttr = (!canForce || !!rs.running) ? 'disabled' : '';
+        const runTitle = runningThis ? 'Run in progress' : (canForce ? 'Run now' : 'Run unavailable');
+        const statusHtml = statusClass === 'waiting' ? '' : `<span class="status ${statusClass}">${statusText}</span>`;
         const safeUrl = i.arr_url ? safe(i.arr_url) : 'URL not set';
         cards.innerHTML += `
-          <div class="instance-card" data-app="${safe(i.app)}" style="display: flex; flex-direction: column; justify-content: space-between;">
+          <div class="instance-card instance-card-shell" data-app="${safe(i.app)}">
             <div>
-              <div class="instance-head" style="margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 16px;">
+              <div class="instance-head">
                 <div class="instance-main">
                   <div class="instance-eyebrow">
-                    <svg width="16" height="16" fill="none" stroke="var(--accent-color)" stroke-width="2" viewBox="0 0 24 24" style="opacity:0.9; flex-shrink:0;"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                    <svg class="instance-eyebrow-icon" width="16" height="16" fill="none" stroke="var(--accent-color)" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
                     <span>${safe(i.app).toUpperCase()}</span>
                   </div>
                   <div class="instance-title">
@@ -2360,42 +1537,42 @@ def create_app(config_path: str) -> Flask:
                     <span class="mono">${safeUrl}</span>
                   </div>
                 </div>
-                <div class="instance-actions">
-                  <div class="instance-actions-row">
-                    <span class="status ${statusClass}" style="padding: 4px 10px; font-size: 12px;">${statusText}</span>
-                  </div>
-                  <div class="instance-actions-row">
-                    <button class="icon-btn" onclick="window.settingsActiveTab='${safe(i.app)}:${safe(i.instance_id)}'; setSection('settings'); loadSettings(); return false;" title="Configure Instance" style="padding: 5px 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.1)'; this.style.color='#fff';" onmouseout="this.style.background='rgba(255,255,255,0.05)'; this.style.color='var(--text-secondary)';">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <div class="instance-utility">
+                  ${statusHtml}
+                  <div class="instance-control-row">
+                    <button class="card-icon-btn" onclick="window.settingsActiveTab='${safe(i.app)}:${safe(i.instance_id)}'; setSection('settings'); loadSettings(); return false;" type="button" title="Settings" aria-label="Settings">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                     </button>
-                    <button class="btn-mini force" data-force-app="${safe(i.app)}" data-force-id="${safe(i.instance_id)}" ${disabledAttr} style="padding: 5px 14px;">FORCE</button>
+                    <button class="card-icon-btn card-icon-btn-run" data-force-app="${safe(i.app)}" data-force-id="${safe(i.instance_id)}" ${disabledAttr} type="button" title="${runTitle}" aria-label="${runTitle}">
+                      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 7.5c0-1.1 1.2-1.77 2.13-1.2l5.74 3.5c.9.55.9 1.85 0 2.4l-5.74 3.5C6.2 16.27 5 15.6 5 14.5v-7z"></path><path d="M12 7.5c0-1.1 1.2-1.77 2.13-1.2l5.74 3.5c.9.55.9 1.85 0 2.4l-5.74 3.5C13.2 16.27 12 15.6 12 14.5v-7z"></path></svg>
+                    </button>
                   </div>
                 </div>
               </div>
-              <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 16px;">
+              <div class="countdown-block">
                 <div>
-                  <div class="big-countdown ${due ? 'due' : ''}" data-next-sync="${safe(s.next_sync_time)}" style="margin:0 0 4px 0;">${cd}</div>
-                  <div class="subline mono" title="${safe(s.next_sync_time) || ''}" style="opacity: 0.8;">Next run (${safe(getTimeZoneLabel())}): ${fmtTime(s.next_sync_time) || '-'}</div>
-                  <div class="subline ${due ? 'warn' : ''}" style="margin-top:2px;">${note}</div>
+                  <div class="big-countdown ${due ? 'due' : ''}" data-next-sync="${safe(s.next_sync_time)}">${cd}</div>
+                  <div class="subline mono countdown-meta" title="${safe(s.next_sync_time) || ''}">Next run (${safe(getTimeZoneLabel())}): ${fmtTime(s.next_sync_time) || '-'}</div>
+                  <div class="subline countdown-note ${due ? 'warn' : ''}">${note}</div>
                 </div>
               </div>
-              <div style="margin-bottom: 20px;">
-                <div class="subline" style="display:flex; justify-content:space-between; gap:10px; font-weight:600;">
+              <div class="rate-panel">
+                <div class="subline rate-row">
                   <span>Rate window (${safe(i.rate_window_minutes)}m)</span>
-                  <span class="mono" style="color: var(--text-primary);">${used} / ${cap}</span>
+                  <span class="mono rate-value">${used} / ${cap}</span>
                 </div>
-                <div class="progress" style="margin-top:8px; height: 6px; background: rgba(0,0,0,0.3);">
+                <div class="progress progress-slim">
                   <div class="${barClass}" style="width:${pct}%;"></div>
                 </div>
               </div>
             </div>
-            <div style="background: rgba(0,0,0,0.15); border-radius: 10px; padding: 14px; border: 1px solid rgba(255,255,255,0.03);">
-              <div class="kv" style="grid-template-columns: repeat(3, 1fr); gap: 12px;">
-                <div><div class="k">Wanted</div><div class="v" style="font-weight:600;">${safe(lrs.wanted_count ?? '-')}</div></div>
-                <div><div class="k">Triggered</div><div class="v" style="font-weight:600; color:var(--success-color);">${safe(lrs.actions_triggered ?? '-')}</div></div>
+            <div class="instance-metrics">
+              <div class="kv metrics-grid">
+                <div><div class="k">Wanted</div><div class="v text-strong">${safe(lrs.wanted_count ?? '-')}</div></div>
+                <div><div class="k">Triggered</div><div class="v text-success text-strong">${safe(lrs.actions_triggered ?? '-')}</div></div>
                 <div><div class="k">Interval</div><div class="v">${safe(i.interval_minutes)}m</div></div>
                 <div><div class="k">Retry</div><div class="v">${safe(i.item_retry_hours)}h</div></div>
-                <div><div class="k" style="white-space:nowrap;">Last Sync</div><div class="v mono" style="font-size:11px;">${fmtTime(s.last_sync_time) || '-'}</div></div>
+                <div><div class="k k-nowrap">Last Sync</div><div class="v mono metric-time">${fmtTime(s.last_sync_time) || '-'}</div></div>
                 <div><div class="k">Window</div><div class="v">${safe(i.rate_window_minutes)}m</div></div>
               </div>
             </div>
@@ -2413,14 +1590,11 @@ def create_app(config_path: str) -> Flask:
       
       const PAGE_SIZE = 10;
       
-      let tabsHtml = '<div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">';
+      let tabsHtml = '<div class="history-tabs">';
       instances.forEach(inst => {
         const key = `${inst.app}:${inst.instance_id}`;
         const isActive = (window.historyActiveTab === key);
-        const bg = isActive ? 'var(--accent-color)' : 'rgba(255,255,255,0.05)';
-        const color = isActive ? '#fff' : 'var(--text-secondary)';
-        const border = isActive ? 'transparent' : 'rgba(255,255,255,0.1)';
-        tabsHtml += `<button style="background:${bg}; color:${color}; border:1px solid ${border}; padding:8px 16px; font-size:13px; font-weight:600; border-radius:8px;" onclick="window.historyActiveTab='${key}'; window.historyPage['${key}']=1; refresh(); return false;">${safe(inst.app).toUpperCase()} - ${safe(inst.instance_name)}</button>`;
+        tabsHtml += `<button class="tab-btn history-tab ${isActive ? 'active' : ''}" onclick="window.historyActiveTab='${key}'; window.historyPage['${key}']=1; refresh(); return false;">${safe(inst.app).toUpperCase()} - ${safe(inst.instance_name)}</button>`;
       });
       tabsHtml += '</div>';
 
@@ -2445,24 +1619,24 @@ def create_app(config_path: str) -> Flask:
           </tr>`;
         }
         if (!body) {
-          body = `<tr><td colspan="2" class="mono" style="color: var(--text-muted); padding:16px;">No searches recorded yet.</td></tr>`;
+          body = `<tr><td colspan="2" class="mono history-empty">No searches recorded yet.</td></tr>`;
         }
 
         // Pagination controls
         let paginationHtml = '';
         if (totalPages > 1) {
-          paginationHtml = `<div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.05);">
-            <div style="font-size:12px; color:var(--text-muted);">Showing ${startIdx + 1} to ${Math.min(startIdx + PAGE_SIZE, totalRows)} of ${totalRows} entries</div>
-            <div style="display:flex; gap:8px;">
-              <button class="btn-mini" style="padding:6px 12px; background:rgba(255,255,255,0.05); color:var(--text-primary); border-color:rgba(255,255,255,0.1);" ${currentPage === 1 ? 'disabled' : ''} onclick="window.historyPage['${key}']=${currentPage-1}; refresh(); return false;">Previous</button>
-              <div style="display:flex; align-items:center; font-size:13px; font-weight:600; padding:0 8px;">Page ${currentPage} of ${totalPages}</div>
-              <button class="btn-mini" style="padding:6px 12px; background:rgba(255,255,255,0.05); color:var(--text-primary); border-color:rgba(255,255,255,0.1);" ${currentPage === totalPages ? 'disabled' : ''} onclick="window.historyPage['${key}']=${currentPage+1}; refresh(); return false;">Next</button>
+          paginationHtml = `<div class="history-pagination">
+            <div class="history-pagination-info">Showing ${startIdx + 1} to ${Math.min(startIdx + PAGE_SIZE, totalRows)} of ${totalRows} entries</div>
+            <div class="history-pagination-controls">
+              <button class="btn-mini btn-mini-neutral" ${currentPage === 1 ? 'disabled' : ''} onclick="window.historyPage['${key}']=${currentPage-1}; refresh(); return false;">Previous</button>
+              <div class="page-status">Page ${currentPage} of ${totalPages}</div>
+              <button class="btn-mini btn-mini-neutral" ${currentPage === totalPages ? 'disabled' : ''} onclick="window.historyPage['${key}']=${currentPage+1}; refresh(); return false;">Next</button>
             </div>
           </div>`;
         }
 
         contentHtml = `
-          <div class="card" style="margin-top:0;">
+          <div class="card history-card">
             <div class="table-wrap">
               <table class="history">
                 <colgroup>
@@ -2627,19 +1801,13 @@ def create_app(config_path: str) -> Flask:
       }
 
       const isGlobal = (window.settingsActiveTab === 'global');
-      const gBg = isGlobal ? 'var(--accent-color)' : 'rgba(255,255,255,0.05)';
-      const gColor = isGlobal ? '#fff' : 'var(--text-secondary)';
-      const gBorder = isGlobal ? 'transparent' : 'rgba(255,255,255,0.1)';
-      let html = `<button style="background:${gBg}; color:${gColor}; border:1px solid ${gBorder}; padding:8px 16px; font-size:13px; font-weight:600; border-radius:8px; cursor:pointer;" onclick="window.settingsActiveTab='global'; window.updateSettingsTabs(window.settingsInstances); return false;">Global Settings</button>`;
+      let html = `<button class="tab-btn settings-tab-btn ${isGlobal ? 'active' : ''}" onclick="window.settingsActiveTab='global'; window.updateSettingsTabs(window.settingsInstances); return false;">Global Settings</button>`;
 
       (instances || []).forEach(inst => {
         const key = `${inst.app}:${inst.instance_id}`;
         const isActive = (window.settingsActiveTab === key);
-        const bg = isActive ? 'var(--accent-color)' : 'rgba(255,255,255,0.05)';
-        const color = isActive ? '#fff' : 'var(--text-secondary)';
-        const border = isActive ? 'transparent' : 'rgba(255,255,255,0.1)';
         const instanceName = String(inst.instance_name || `${String(inst.app || '').toUpperCase()} ${inst.instance_id}`).trim();
-        html += `<button style="background:${bg}; color:${color}; border:1px solid ${border}; padding:8px 16px; font-size:13px; font-weight:600; border-radius:8px; cursor:pointer;" onclick="window.settingsActiveTab='${key}'; window.updateSettingsTabs(window.settingsInstances); return false;">${safe(inst.app).toUpperCase()} - ${safe(instanceName)}</button>`;
+        html += `<button class="tab-btn settings-tab-btn ${isActive ? 'active' : ''}" onclick="window.settingsActiveTab='${key}'; window.updateSettingsTabs(window.settingsInstances); return false;">${safe(inst.app).toUpperCase()} - ${safe(instanceName)}</button>`;
       });
       tabsWrap.innerHTML = html;
 
@@ -2653,7 +1821,7 @@ def create_app(config_path: str) -> Flask:
       wrap.innerHTML = '';
       window.settingsInstances = sortSettingsInstances(instances);
       if (!window.settingsInstances.length) {
-        wrap.innerHTML = `<div class="card settings-tab-content" id="settings-tab-empty" style="padding:20px; margin-top:0;"><div class="subline">No instances configured yet. Use the add buttons above to create a Radarr or Sonarr instance.</div></div>`;
+        wrap.innerHTML = `<div class="card settings-tab-content empty-state-card" id="settings-tab-empty"><div class="subline">No instances configured yet. Use the add buttons above to create a Radarr or Sonarr instance.</div></div>`;
       }
       for (const inst of window.settingsInstances) {
         const key = `${inst.app}:${inst.instance_id}`;
@@ -2664,8 +1832,8 @@ def create_app(config_path: str) -> Flask:
         const order = String(inst.search_order || 'smart').toLowerCase();
         const orderUi = `
               <div class="field">
-                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Search Order</div>
-                <select class="cfg si_search_order" style="width:100%; min-height:40px; display:block; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; font-family:inherit; outline:none; box-sizing:border-box;">
+                <div class="label">Search Order</div>
+                <select class="cfg si_search_order">
                   <option value="smart" ${order === 'smart' ? 'selected' : ''}>Smart (Recent, Random, Oldest)</option>
                   <option value="newest" ${order === 'newest' ? 'selected' : ''}>Newest First</option>
                   <option value="random" ${order === 'random' ? 'selected' : ''}>Random</option>
@@ -2674,41 +1842,41 @@ def create_app(config_path: str) -> Flask:
               </div>
         `;
         const behaviorUi = `
-            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:20px; align-items:end; margin-bottom:20px;">
+            <div class="settings-grid-auto settings-grid-spaced">
               <div class="field">
-                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">
+                <div class="label">
                   Quiet Start (HH:MM)
                   <span class="info-icon" title="Searches will pause during quiet hours. Force runs bypass these hours."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <input class="cfg mono si_quiet_start" type="text" value="${safe(inst.quiet_hours_start)}" placeholder="23:00" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                <input class="cfg mono si_quiet_start" type="text" value="${safe(inst.quiet_hours_start)}" placeholder="23:00"/>
               </div>
               <div class="field">
-                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">
+                <div class="label">
                   Quiet End (HH:MM)
                   <span class="info-icon" title="Searches resume after this time. Force runs bypass these hours."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <input class="cfg mono si_quiet_end" type="text" value="${safe(inst.quiet_hours_end)}" placeholder="06:00" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                <input class="cfg mono si_quiet_end" type="text" value="${safe(inst.quiet_hours_end)}" placeholder="06:00"/>
               </div>
               <div class="field">
-                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">
+                <div class="label">
                   Hours After Release
                   <span class="info-icon" title="Minimum hours after a title's release date before Seekarr will search for it."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <input class="cfg si_after_release" type="number" min="0" value="${safe(inst.min_hours_after_release)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                <input class="cfg si_after_release" type="number" min="0" value="${safe(inst.min_hours_after_release)}"/>
               </div>
               <div class="field">
-                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">
+                <div class="label">
                   Seconds Between
                   <span class="info-icon" title="Minimum delay in seconds between consecutive search actions to avoid hammering the indexer."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <input class="cfg si_between" type="number" min="0" value="${safe(inst.min_seconds_between_actions)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                <input class="cfg si_between" type="number" min="0" value="${safe(inst.min_seconds_between_actions)}"/>
               </div>
               <div class="field">
-                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">
+                <div class="label">
                   Upgrade Source
                   <span class="info-icon" title="Wanted List = Arr's cutoff-unmet upgrade list. Monitored Items = Any monitored item that has files. Both = Combines both sources."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <select class="cfg si_upgrade_scope" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; font-family:inherit; outline:none;">
+                <select class="cfg si_upgrade_scope">
                   <option value="wanted" ${upgradeScope === 'wanted' ? 'selected' : ''}>Wanted List</option>
                   <option value="monitored" ${upgradeScope === 'monitored' ? 'selected' : ''}>Monitored Items</option>
                   <option value="both" ${upgradeScope === 'both' ? 'selected' : ''}>Both Sources</option>
@@ -2717,40 +1885,40 @@ def create_app(config_path: str) -> Flask:
             </div>
         `;
         const limitsUi = `
-            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:20px; align-items:end;">
+            <div class="settings-grid-auto">
               <div class="field">
-                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Interval (min)</div>
-                <input class="cfg si_interval" type="number" min="1" value="${safe(inst.interval_minutes)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                <div class="label">Interval (min)</div>
+                <input class="cfg si_interval" type="number" min="1" value="${safe(inst.interval_minutes)}"/>
               </div>
               <div class="field">
-                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Retry (hours)</div>
-                <input class="cfg si_retry" type="number" min="1" value="${safe(inst.item_retry_hours)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                <div class="label">Retry (hours)</div>
+                <input class="cfg si_retry" type="number" min="1" value="${safe(inst.item_retry_hours)}"/>
               </div>
               <div class="field">
-                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Rate Window (min)</div>
-                <input class="cfg si_rate_window" type="number" min="1" value="${safe(inst.rate_window_minutes)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                <div class="label">Rate Window (min)</div>
+                <input class="cfg si_rate_window" type="number" min="1" value="${safe(inst.rate_window_minutes)}"/>
               </div>
               <div class="field">
-                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Rate Cap</div>
-                <input class="cfg si_rate_cap" type="number" min="1" value="${safe(inst.rate_cap)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                <div class="label">Rate Cap</div>
+                <input class="cfg si_rate_cap" type="number" min="1" value="${safe(inst.rate_cap)}"/>
               </div>
               <div class="field">
-                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Missing Per Run</div>
-                <input class="cfg si_missing_per_run" type="number" min="0" value="${safe(inst.max_missing_actions_per_instance_per_sync)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                <div class="label">Missing Per Run</div>
+                <input class="cfg si_missing_per_run" type="number" min="0" value="${safe(inst.max_missing_actions_per_instance_per_sync)}"/>
               </div>
               <div class="field">
-                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Upgrades Per Run</div>
-                <input class="cfg si_upgrades_per_run" type="number" min="0" value="${safe(inst.max_cutoff_actions_per_instance_per_sync)}" style="width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                <div class="label">Upgrades Per Run</div>
+                <input class="cfg si_upgrades_per_run" type="number" min="0" value="${safe(inst.max_cutoff_actions_per_instance_per_sync)}"/>
               </div>
             </div>
         `;
         const modeUi = (inst.app === 'sonarr') ? `
-              <div class="field" style="margin-top:20px;">
-                <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">
+              <div class="field field-stack-gap">
+                <div class="label">
                   Missing Mode
                   <span class="info-icon" title="Smart = auto-selects best mode. Season Packs = uses SeasonSearch API. Show Batch = EpisodeSearch for all missing eps in a show. Episode = per-episode search."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <select class="cfg si_missing_mode" style="width:100%; min-height:40px; display:block; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; font-family:inherit; outline:none; box-sizing:border-box;">
+                <select class="cfg si_missing_mode">
                   <option value="smart" ${mode === 'smart' ? 'selected' : ''}>Smart</option>
                   <option value="season_packs" ${mode === 'season_packs' ? 'selected' : ''}>Season Packs</option>
                   <option value="shows" ${mode === 'shows' ? 'selected' : ''}>Show Batch</option>
@@ -2759,43 +1927,42 @@ def create_app(config_path: str) -> Flask:
               </div>
         ` : '';
         wrap.innerHTML += `
-          <div class="card settings-tab-content" id="settings-tab-${safe(key)}" data-app="${safe(inst.app)}" data-key="${safe(key)}" style="padding:24px; display:none; margin-top:0;">
-            <div class="instance-head" style="align-items:flex-start; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:20px; margin-bottom:24px;">
+          <div class="card settings-tab-content settings-instance-card" id="settings-tab-${safe(key)}" data-app="${safe(inst.app)}" data-key="${safe(key)}">
+            <div class="instance-head settings-instance-head">
               <div>
-                <div class="instance-title" style="font-size:18px; display:flex; gap:10px; align-items:center;">
-                  <svg width="22" height="22" fill="none" stroke="var(--accent-color)" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-                  ${safe(inst.app).toUpperCase()} - ${safe(instanceName)}
-                  <span style="color:var(--text-muted); font-size:13px; font-weight:500;">#${safe(inst.instance_id)}</span>
+                <div class="instance-title settings-instance-title">
+                  <svg class="settings-instance-icon" width="22" height="22" fill="none" stroke="var(--accent-color)" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                  <span>${safe(inst.app).toUpperCase()} - ${safe(instanceName)}</span>
+                  <span class="settings-instance-badge">#${safe(inst.instance_id)}</span>
                 </div>
-                <div class="subline mono" style="margin-top:8px; opacity:0.8;">${safe(inst.arr_url) || '-'}</div>
+                <div class="subline mono settings-instance-url">${safe(inst.arr_url) || '-'}</div>
               </div>
-              <div class="pill-row" style="gap:20px; background:rgba(0,0,0,0.4); padding:10px 16px; border-radius:10px; border:1px solid rgba(255,255,255,0.05);">
-                <label class="tog subline" style="cursor:pointer; font-weight:600; font-size:14px; color:var(--text-primary); display:flex; align-items:center; gap:8px;"><input type="checkbox" class="si_enabled" ${inst.enabled ? 'checked' : ''} style="width:18px; height:18px; accent-color:var(--accent-color);"> Enabled</label>
-                <label class="tog subline" style="cursor:pointer; font-weight:600; font-size:14px; color:var(--text-primary); display:flex; align-items:center; gap:8px;"><input type="checkbox" class="si_missing" ${inst.search_missing ? 'checked' : ''} style="width:18px; height:18px; accent-color:var(--accent-color);"> Missing</label>
-                <label class="tog subline" style="cursor:pointer; font-weight:600; font-size:14px; color:var(--text-primary); display:flex; align-items:center; gap:8px;"><input type="checkbox" class="si_cutoff" ${inst.search_cutoff_unmet ? 'checked' : ''} style="width:18px; height:18px; accent-color:var(--accent-color);"> Upgrades</label>
+              <div class="pill-row settings-toggle-group">
+                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_enabled" ${inst.enabled ? 'checked' : ''}> Enabled</label>
+                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_missing" ${inst.search_missing ? 'checked' : ''}> Missing</label>
+                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_cutoff" ${inst.search_cutoff_unmet ? 'checked' : ''}> Upgrades</label>
               </div>
             </div>
 
-            <!-- Connection Settings -->
-            <div style="background:rgba(255,255,255,0.015); border:1px solid rgba(255,255,255,0.05); border-radius:12px; padding:20px; margin-bottom:24px;">
-              <h4 style="margin:0 0 16px 0; color:var(--text-primary); font-size:16px; letter-spacing:0.02em; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:10px;">Connection Details</h4>
-              <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:20px; align-items:end;">
+            <div class="settings-panel">
+              <h4 class="settings-panel-title">Connection Details</h4>
+              <div class="settings-grid-wide">
                 <div class="field">
-                  <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Instance Name</div>
-                  <input class="cfg si_name" type="text" value="${safe(instanceName)}" style="width:100%; min-height:40px; display:block; padding:8px 12px; box-sizing:border-box; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                  <div class="label">Instance Name</div>
+                  <input class="cfg si_name" type="text" value="${safe(instanceName)}"/>
                 </div>
                 <div class="field">
-                  <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">Arr URL</div>
-                  <input class="cfg mono si_url" type="text" value="${safe(inst.arr_url)}" style="width:100%; min-height:40px; display:block; padding:8px 12px; box-sizing:border-box; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
+                  <div class="label">Arr URL</div>
+                  <input class="cfg mono si_url" type="text" value="${safe(inst.arr_url)}"/>
                 </div>
                 <div class="field">
-                  <div class="label" style="font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin-bottom:6px;">
+                  <div class="label">
                     API Key
                     <span class="info-icon" title="Enter a new key to update it. Leave blank to keep the existing key unchanged."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                   </div>
-                  <div class="inline-input" style="display:flex; gap:10px; width:100%;">
-                    <input class="cfg mono si_apikey" type="password" value="" placeholder="${inst.api_key_set ? '********' : '(not set)'}" style="flex:1; width:100%; min-height:40px; display:block; box-sizing:border-box; padding:8px 12px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); color:var(--text-primary); font-size:14px; outline:none;"/>
-                    <button class="icon-btn danger" type="button" title="Delete stored API key" style="height:40px; width:40px; padding:0; display:flex; align-items:center; justify-content:center; background:rgba(239,68,68,0.1); color:#ef4444; border:1px solid rgba(239,68,68,0.2); border-radius:8px; cursor:pointer; flex-shrink:0;"
+                  <div class="inline-input settings-api-key-row">
+                    <input class="cfg mono si_apikey" type="password" value="" placeholder="${inst.api_key_set ? '********' : '(not set)'}"/>
+                    <button class="icon-btn danger" type="button" title="Delete stored API key"
                             data-clear-key="1" data-app="${safe(inst.app)}" data-id="${safe(inst.instance_id)}" ${inst.api_key_set ? '' : 'disabled'}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
                         <path d="M3 6h18"></path>
@@ -2810,35 +1977,32 @@ def create_app(config_path: str) -> Flask:
               </div>
             </div>
 
-            <!-- Limits & Intervals -->
-            <div style="background:rgba(255,255,255,0.015); border:1px solid rgba(255,255,255,0.05); border-radius:12px; padding:20px; margin-bottom:24px;">
-              <h4 style="margin:0 0 16px 0; color:var(--text-primary); font-size:16px; letter-spacing:0.02em; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:10px;">Limits & Intervals</h4>
+            <div class="settings-panel">
+              <h4 class="settings-panel-title">Limits & Intervals</h4>
               ${limitsUi}
             </div>
 
-            <!-- Search Behavior -->
-            <div style="background:rgba(255,255,255,0.015); border:1px solid rgba(255,255,255,0.05); border-radius:12px; padding:20px; margin-bottom:24px;">
-              <h4 style="margin:0 0 16px 0; color:var(--text-primary); font-size:16px; letter-spacing:0.02em; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:10px;">Search Behavior</h4>
+            <div class="settings-panel">
+              <h4 class="settings-panel-title">Search Behavior</h4>
               ${behaviorUi}
-              <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:20px; align-items:end;">
+              <div class="settings-grid-auto">
                 ${orderUi}
                 ${modeUi}
               </div>
             </div>
 
-            <div style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.18); border-radius:12px; padding:20px; margin-bottom:4px;">
-              <h4 style="margin:0 0 8px 0; color:#fecaca; font-size:16px; letter-spacing:0.02em;">Remove Instance</h4>
-              <div class="subline" style="margin-bottom:16px; color:rgba(254,202,202,0.88);">
+            <div class="settings-panel danger-panel">
+              <h4 class="settings-panel-title danger-title">Remove Instance</h4>
+              <div class="subline danger-copy">
                 Removes this instance from Seekarr and deletes its stored API key, schedule state, and instance-specific history.
               </div>
               <button
-                class="btn-secondary"
+                class="btn-secondary danger-soft"
                 type="button"
                 data-delete-instance="1"
                 data-app="${safe(inst.app)}"
                 data-id="${safe(inst.instance_id)}"
                 data-name="${safe(instanceName)}"
-                style="border-color:rgba(239,68,68,0.38); background:rgba(239,68,68,0.12); color:#fecaca;"
               >
                 Remove This Instance
               </button>
@@ -2934,7 +2098,7 @@ def create_app(config_path: str) -> Flask:
         refreshSettingsDirtyState();
       }
     });
-    document.querySelectorAll('.nav-item').forEach(a => {
+    document.querySelectorAll('.nav-control').forEach(a => {
       a.addEventListener('click', () => {
         if (a.dataset.section === 'settings') loadSettings();
       });
@@ -2943,7 +2107,7 @@ def create_app(config_path: str) -> Flask:
   </script>
 </body>
 </html>
-"""
+""".replace("__ASSET_CACHE_KEY__", asset_cache_key)
 
     @app.get("/api/status")
     def status() -> Any:
@@ -3123,19 +2287,26 @@ def create_app(config_path: str) -> Flask:
             return send_file(icon, mimetype="image/svg+xml")
         return "", 204
 
-    @app.get("/branding/banner.svg")
-    def branding_banner() -> Any:
+    @app.get("/assets/banner.svg")
+    def asset_banner() -> Any:
         banner = _asset_path("seekarr-banner.svg")
         if not banner.exists():
             return jsonify({"error": "Banner asset not found"}), 404
         return send_file(banner, mimetype="image/svg+xml")
 
-    @app.get("/branding/logo.svg")
-    def branding_logo() -> Any:
+    @app.get("/assets/logo.svg")
+    def asset_logo() -> Any:
         logo = _asset_path("seekarr-logo.svg")
         if not logo.exists():
             return jsonify({"error": "Logo asset not found"}), 404
         return send_file(logo, mimetype="image/svg+xml")
+
+    @app.get("/assets/webui.css")
+    def asset_webui_css() -> Any:
+        stylesheet = _asset_path("webui.css")
+        if not stylesheet.exists():
+            return jsonify({"error": "Stylesheet asset not found"}), 404
+        return send_file(stylesheet, mimetype="text/css")
 
     return app
 

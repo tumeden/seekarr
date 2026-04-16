@@ -26,7 +26,7 @@ jobs:
           (cd dist && sha256sum "seekarr-${VERSION}.zip" > "seekarr-${VERSION}.zip.sha256")
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/seekarr-${{ github.ref_name }}.zip

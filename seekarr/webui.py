@@ -927,14 +927,8 @@ def create_app(config_path: str) -> Flask:
 
       <section class="content-section" id="section-settings">
         <div class="settings-head">
-          <div class="settings-tabs" id="settings-tabs"></div>
-          <div class="settings-actions">
-            <button class="btn-secondary" id="add-radarr-instance" type="button">
-            + Add Radarr Instance
-            </button>
-            <button class="btn-secondary" id="add-sonarr-instance" type="button">
-            + Add Sonarr Instance
-            </button>
+          <div class="settings-head-block settings-tabs-block">
+            <div class="settings-tabs" id="settings-tabs"></div>
           </div>
         </div>
         
@@ -945,15 +939,38 @@ def create_app(config_path: str) -> Flask:
               <h3>Global Configuration</h3>
             </div>
             <div class="subline settings-global-copy">App-wide settings affecting all instances.</div>
-            
-            <div class="field settings-global-field">
-              <div class="label">Quiet Hours Timezone</div>
-              <input id="settings-quiet-timezone" class="cfg mono" type="text" list="timezone-options"
-                     placeholder="Search timezone (example: America/New_York)"/>
-              <datalist id="timezone-options"></datalist>
+
+            <div class="settings-global-section settings-global-actions-wrap">
+              <div class="settings-global-actions-copy">
+                <h4>Add Instance</h4>
+                <div class="subline">Create a new Radarr or Sonarr connection.</div>
+              </div>
+              <div class="settings-global-actions">
+                <button class="btn-secondary settings-add-btn" id="add-radarr-instance" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
+                Add Radarr
+                </button>
+                <button class="btn-secondary settings-add-btn" id="add-sonarr-instance" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
+                Add Sonarr
+                </button>
+              </div>
             </div>
-            <div class="subline settings-global-help">
-              Used for quiet start/end evaluation. Leave empty to use server/container local timezone.
+
+            <div class="settings-global-section settings-global-preferences">
+              <div class="settings-global-preferences-copy">
+                <h4>Global Preferences</h4>
+                <div class="subline">Shared settings used across every configured instance.</div>
+              </div>
+              <div class="field settings-global-field">
+                <div class="label">Quiet Hours Timezone</div>
+                <input id="settings-quiet-timezone" class="cfg mono" type="text" list="timezone-options"
+                       placeholder="Search timezone (example: America/New_York)"/>
+                <datalist id="timezone-options"></datalist>
+              </div>
+              <div class="subline settings-global-help">
+                Used for quiet start/end evaluation. Leave empty to use server/container local timezone.
+              </div>
             </div>
           </div>
           

@@ -1128,15 +1128,44 @@ select.cfg:focus {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   flex-wrap: wrap;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(16, 18, 22, 0.94), rgba(10, 11, 14, 0.98)),
+    radial-gradient(420px 180px at 0% 0%, rgba(249, 115, 22, 0.08), transparent 72%);
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.settings-head-block {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.settings-tabs-block {
+  flex: 1 1 auto;
+  padding: 10px;
 }
 
 .settings-actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
+}
+
+#settings-content-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .settings-save-fab {
@@ -1450,8 +1479,22 @@ body {
 .settings-tabs,
 .history-tabs {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(249, 115, 22, 0.35) transparent;
+}
+
+.settings-tabs::-webkit-scrollbar,
+.history-tabs::-webkit-scrollbar {
+  height: 6px;
+}
+
+.settings-tabs::-webkit-scrollbar-thumb,
+.history-tabs::-webkit-scrollbar-thumb {
+  background: rgba(249, 115, 22, 0.28);
+  border-radius: 999px;
 }
 
 .tab-btn {
@@ -1463,6 +1506,8 @@ body {
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.01em;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .tab-btn:hover {
@@ -1476,6 +1521,30 @@ body {
   border-color: transparent;
   color: #0b0d12;
   box-shadow: 0 12px 24px rgba(249, 115, 22, 0.18);
+}
+
+.settings-tab-btn {
+  min-height: 34px;
+}
+
+.settings-add-btn {
+  min-height: 36px;
+  padding-inline: 14px;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+  font-weight: 800;
+}
+
+.settings-add-btn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.settings-add-btn:hover {
+  border-color: rgba(249, 115, 22, 0.3);
+  background: rgba(249, 115, 22, 0.08);
 }
 
 .actions {
@@ -1736,6 +1805,46 @@ body {
 
 .settings-global-card {
   padding: 20px;
+  margin-bottom: 0;
+}
+
+.settings-global-section {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.settings-global-actions-wrap {
+  margin-top: 0;
+  padding: 16px 18px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 16px 18px;
+  flex-wrap: wrap;
+}
+
+.settings-global-actions-copy {
+  min-width: 0;
+  flex: 0 1 280px;
+}
+
+.settings-global-actions-copy h4,
+.settings-global-preferences-copy h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+
+.settings-global-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
 }
 
 .settings-global-head {
@@ -1760,8 +1869,17 @@ body {
   margin-bottom: 24px;
 }
 
-.settings-global-field {
+.settings-global-preferences {
   margin-top: 16px;
+  padding: 16px 18px 18px;
+}
+
+.settings-global-preferences-copy {
+  margin-bottom: 14px;
+}
+
+.settings-global-field {
+  margin-top: 0;
   max-width: 400px;
 }
 
@@ -1779,6 +1897,7 @@ body {
 .settings-instance-card {
   padding: 24px;
   display: none;
+  margin-bottom: 0;
 }
 
 .settings-instance-head {
@@ -1930,8 +2049,16 @@ body {
 }
 
 @media (max-width: 900px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    display: none !important;
+  }
+
   .main {
-    padding: 0 14px 104px;
+    padding: 0 14px 96px;
   }
 
   .topbar,
@@ -1944,6 +2071,7 @@ body {
   .topbar {
     padding: 16px 16px 14px;
     border-radius: 20px 20px 0 0;
+    gap: 14px;
   }
 
   .topbar-copy,
@@ -1961,44 +2089,53 @@ body {
 
   .topbar-actions {
     justify-content: flex-start;
+    align-items: center;
   }
 
   .content-canvas {
     padding: 14px 14px 20px;
     border-radius: 0 0 20px 20px;
+    overflow: hidden;
   }
 
-  .mobile-nav {
-    display: block;
-  }
-
-  .mobile-nav {
-    position: sticky;
-    top: 0;
-    z-index: 30;
-    padding: 0 0 10px;
-    background: linear-gradient(180deg, rgba(12, 14, 18, 0.98), rgba(12, 14, 18, 0.82));
-    backdrop-filter: blur(12px);
+  .dashboard-brand,
+  .dashboard-header {
+    display: none;
   }
 
   .mobile-nav {
     display: flex;
     gap: 8px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    position: relative !important;
+    top: auto !important;
+    z-index: 2;
+    margin: 0 0 12px;
+    padding: 2px;
+    border-radius: 14px;
+    background: rgba(10, 12, 16, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    backdrop-filter: none !important;
   }
 
   .mobile-nav-item {
-    flex: 1 1 calc(33.333% - 8px);
+    flex: 1 1 0;
     min-width: 0;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 10px;
     background: rgba(255, 255, 255, 0.045);
     color: var(--text-secondary);
-    padding: 10px 12px;
+    padding: 9px 10px;
+    min-height: 38px;
     font-size: 12px;
     font-weight: 800;
     letter-spacing: 0.03em;
     text-transform: uppercase;
+  }
+
+  .content-section {
+    position: relative;
+    z-index: 1;
   }
 
   .mobile-nav-item.active {
@@ -2018,10 +2155,73 @@ body {
 
   .history-pagination-controls {
     justify-content: space-between;
+    width: 100%;
+  }
+
+  .settings-head {
+    padding: 12px;
+  }
+
+  .settings-head-block {
+    width: 100%;
+  }
+
+  .settings-tabs {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .settings-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .settings-actions > button {
+    flex: 1 1 calc(50% - 5px);
+  }
+
+  .settings-instance-card,
+  .settings-global-card,
+  .settings-panel {
+    padding: 18px;
+  }
+
+  .settings-global-actions-wrap {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+
+  .settings-global-actions-copy {
+    flex: 0 1 auto;
+  }
+
+  .settings-global-preferences {
+    padding: 16px;
+  }
+
+  .settings-global-actions {
+    justify-content: stretch;
+    width: 100%;
+  }
+
+  .settings-tab-btn {
+    flex: 1 1 calc(50% - 4px);
+    text-align: center;
+  }
+
+  .settings-global-actions > button {
+    flex: 1 1 calc(50% - 4px);
   }
 
   .settings-instance-head {
     gap: 16px;
+  }
+
+  .toast-stack {
+    left: 14px;
+    right: 14px;
+    bottom: 90px;
   }
 }
 
@@ -2036,11 +2236,12 @@ body {
 
   .topbar-actions {
     gap: 8px;
+    align-items: flex-start;
   }
 
   .topbar-badge,
   .topbar .chip {
-    width: 100%;
+    width: auto;
     justify-content: center;
   }
 
@@ -2048,9 +2249,23 @@ body {
     width: 100%;
   }
 
+  .topbar-title-wrap p {
+    display: none;
+  }
+
+  .mobile-nav {
+    gap: 6px;
+  }
+
+  .mobile-nav-item {
+    flex: 1 1 0;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    padding-inline: 8px;
+  }
+
   .settings-tabs .tab-btn,
   .history-tabs .tab-btn {
-    flex: 1 1 100%;
     justify-content: center;
   }
 
@@ -2058,8 +2273,30 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .mobile-nav-item {
+  .settings-actions > button {
     flex-basis: 100%;
+  }
+
+  .settings-tab-btn {
+    flex-basis: 100%;
+  }
+
+  .settings-global-actions > button {
+    flex-basis: 100%;
+  }
+
+  .settings-save-fab {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 10px;
+  }
+
+  .settings-save-fab .subline,
+  .save-button {
+    width: 100%;
   }
 
   .settings-toggle-group {

@@ -840,9 +840,9 @@ def create_app(config_path: str) -> Flask:
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <svg class="brand-mark" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        <span class="brand-wordmark">Seekarr</span>
+        <img src="/assets/sidebar-brand.svg" alt="Seekarr search automation" class="sidebar-brand-image"/>
       </div>
+      <nav class="sidebar-nav" aria-label="Primary">
       <a class="nav-item nav-control active" data-section="dashboard" href="#">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
         Dashboard
@@ -856,15 +856,38 @@ def create_app(config_path: str) -> Flask:
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         Configuration
       </a>
+      </nav>
       <div class="sidebar-badges">
         <a class="sidebar-badge" href="https://github.com/tumeden/seekarr" target="_blank" rel="noopener noreferrer">GitHub</a>
         <a class="sidebar-badge" href="https://hub.docker.com/r/tumeden/seekarr" target="_blank" rel="noopener noreferrer">Docker Hub</a>
-        <span class="sidebar-badge" id="version-chip">Version --</span>
-        <a class="sidebar-badge update" id="update-chip" href="https://github.com/tumeden/seekarr/releases/latest"
-           target="_blank" rel="noopener noreferrer" style="display:none;">Update available</a>
+        <a class="sidebar-badge sidebar-badge-support" href="https://ko-fi.com/tumeden" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 6h9a1 1 0 0 1 1 1v7a4 4 0 0 1-4 4h-3a4 4 0 0 1-4-4V7a1 1 0 0 1 1-1z"></path><path d="M17 8h1.5a2.5 2.5 0 0 1 0 5H17"></path><path d="M8 3c0 1 .7 1.6 1.4 2.2.7.6 1.4 1.2 1.4 2.3"></path><path d="M12 3c0 1 .7 1.6 1.4 2.2.7.6 1.4 1.2 1.4 2.3"></path></svg>
+          Donate a coffee
+        </a>
       </div>
     </aside>
     <main class="main">
+      <header class="topbar">
+        <div class="topbar-copy">
+          <div class="topbar-title-wrap">
+            <h1 id="topbar-title">Dashboard</h1>
+            <p id="topbar-subtitle">Overview, schedules, and recent search activity.</p>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <span class="topbar-message" id="msg"></span>
+          <div class="actions dashboard-actions">
+            <label class="chip toggle-chip">
+              <input id="autorun-toggle" type="checkbox" checked />
+              Auto-run
+            </label>
+          </div>
+          <span class="topbar-badge" id="version-chip">Version --</span>
+          <a class="topbar-badge update" id="update-chip" href="https://github.com/tumeden/seekarr/releases/latest"
+             target="_blank" rel="noopener noreferrer" style="display:none;">Update available</a>
+        </div>
+      </header>
+      <div class="content-canvas">
       <div class="mobile-nav" aria-label="Sections">
         <button class="mobile-nav-item nav-control active" data-section="dashboard" type="button">Dashboard</button>
         <button class="mobile-nav-item nav-control" data-section="runs" type="button">History</button>
@@ -879,13 +902,6 @@ def create_app(config_path: str) -> Flask:
               <h1>Seekarr</h1>
               <div class="dashboard-brand-tagline">Missing + upgrade search automation</div>
             </div>
-          </div>
-          <div class="actions dashboard-actions">
-            <label class="chip toggle-chip">
-              <input id="autorun-toggle" type="checkbox" checked />
-              Auto-run
-            </label>
-            <span id="msg"></span>
           </div>
         </div>
 
@@ -944,6 +960,7 @@ def create_app(config_path: str) -> Flask:
           <div id="settings-instance-cards"></div>
         </div>
       </section>
+      </div>
     </main>
   </div>
   <div class="settings-save-fab" id="settings-save-fab">
@@ -1334,11 +1351,33 @@ def create_app(config_path: str) -> Flask:
         return dt.toLocaleString();
       }
     }
+    const sectionMeta = {
+      dashboard: {
+        title: 'Dashboard',
+        subtitle: 'Overview, schedules, and recent search activity.',
+      },
+      runs: {
+        title: 'History',
+        subtitle: 'Per-instance search history and recent activity.',
+      },
+      settings: {
+        title: 'Configuration',
+        subtitle: 'Global settings, instance controls, and automation behavior.',
+      },
+    };
+    function syncTopbar(name) {
+      const meta = sectionMeta[name] || sectionMeta.dashboard;
+      const title = document.getElementById('topbar-title');
+      const subtitle = document.getElementById('topbar-subtitle');
+      if (title) title.textContent = meta.title;
+      if (subtitle) subtitle.textContent = meta.subtitle;
+    }
     function setSection(name) {
       document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
       document.getElementById(`section-${name}`)?.classList.add('active');
       document.querySelectorAll('.nav-control').forEach(a => a.classList.remove('active'));
       document.querySelectorAll(`.nav-control[data-section="${name}"]`).forEach(a => a.classList.add('active'));
+      syncTopbar(name);
     }
     document.querySelectorAll('.nav-control').forEach(a => {
       a.addEventListener('click', (e) => {
@@ -2300,6 +2339,13 @@ def create_app(config_path: str) -> Flask:
         if not logo.exists():
             return jsonify({"error": "Logo asset not found"}), 404
         return send_file(logo, mimetype="image/svg+xml")
+
+    @app.get("/assets/sidebar-brand.svg")
+    def asset_sidebar_brand() -> Any:
+        brand = _asset_path("seekarr-sidebar-brand.svg")
+        if not brand.exists():
+            return jsonify({"error": "Sidebar brand asset not found"}), 404
+        return send_file(brand, mimetype="image/svg+xml")
 
     @app.get("/assets/webui.css")
     def asset_webui_css() -> Any:

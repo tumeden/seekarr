@@ -53,15 +53,19 @@ body.auth-locked .settings-save-fab {
 .sidebar {
   background: linear-gradient(180deg, rgba(11, 11, 12, 0.98), rgba(8, 8, 9, 0.98));
   border-right: 1px solid rgba(249, 115, 22, 0.14);
-  padding: 18px 14px;
+  padding: 22px 16px 18px;
 }
 
 .brand {
-  font-weight: 800;
-  font-size: 16px;
-  letter-spacing: 0.3px;
-  color: #fff;
-  margin-bottom: 14px;
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.sidebar-brand-image {
+  display: block;
+  width: min(100%, 224px);
+  height: auto;
 }
 
 .nav-item {
@@ -70,14 +74,13 @@ body.auth-locked .settings-save-fab {
   gap: 10px;
   text-decoration: none;
   color: var(--text-muted);
-  padding: 10px 14px;
-  margin-bottom: 6px;
-  border-radius: 8px;
-  font-weight: 500;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  font-weight: 600;
   font-size: 14px;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.015);
   border: 1px solid transparent;
-  border-left: 3px solid transparent;
   transition: var(--transition);
 }
 
@@ -89,8 +92,9 @@ body.auth-locked .settings-save-fab {
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.045);
   color: var(--text-secondary);
+  border-color: rgba(249, 115, 22, 0.08);
 }
 
 .nav-item:hover svg {
@@ -99,8 +103,11 @@ body.auth-locked .settings-save-fab {
 
 .nav-item.active {
   color: #fff;
-  background: linear-gradient(90deg, rgba(249, 115, 22, 0.15), transparent);
-  border-left: 3px solid var(--accent-color);
+  background: linear-gradient(90deg, rgba(249, 115, 22, 0.16), rgba(249, 115, 22, 0.03));
+  border-color: rgba(249, 115, 22, 0.16);
+  box-shadow:
+    inset 3px 0 0 var(--accent-color),
+    0 8px 18px rgba(0, 0, 0, 0.18);
 }
 
 .nav-item.active svg {
@@ -109,12 +116,17 @@ body.auth-locked .settings-save-fab {
 }
 
 .sidebar-badges {
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
   border-top: 1px solid rgba(249, 115, 22, 0.14);
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
 }
 
 .sidebar-badge {
@@ -123,7 +135,7 @@ body.auth-locked .settings-save-fab {
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 700;
-  padding: 5px 8px;
+  padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.10);
   background: rgba(15, 23, 42, 0.45);
@@ -142,6 +154,27 @@ body.auth-locked .settings-save-fab {
 
 .sidebar-badge.update:hover {
   border-color: rgba(245, 158, 11, 0.55);
+}
+
+.sidebar-badge-support {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-color: rgba(255, 94, 91, 0.28);
+  background: rgba(255, 94, 91, 0.10);
+  color: rgba(255, 229, 229, 0.96);
+}
+
+.sidebar-badge-support svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  opacity: 0.92;
+}
+
+.sidebar-badge-support:hover {
+  border-color: rgba(255, 94, 91, 0.45);
+  background: rgba(255, 94, 91, 0.16);
 }
 
 .main {
@@ -1208,6 +1241,8 @@ body {
 .sidebar {
   position: sticky;
   top: 0;
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
   padding: 24px 16px;
 }
@@ -1224,32 +1259,128 @@ body {
   flex-shrink: 0;
 }
 
-.brand-wordmark {
-  letter-spacing: 0.02em;
-}
-
 .main {
-  padding: 0 20px 40px;
+  padding: 18px 22px 40px 0;
 }
 
-.hero-banner,
-.mobile-nav,
-.content-section {
+.topbar,
+.content-canvas {
   width: min(100%, var(--page-max-width));
-  margin: 0 auto;
+  margin: 0;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px 20px;
+  padding: 18px 22px 16px;
+  border: 1px solid rgba(249, 115, 22, 0.14);
+  border-bottom: 0;
+  border-radius: 24px 24px 0 0;
+  background:
+    linear-gradient(180deg, rgba(17, 18, 21, 0.94), rgba(10, 11, 14, 0.98)),
+    radial-gradient(520px 220px at 0% 0%, rgba(249, 115, 22, 0.12), transparent 70%);
+  box-shadow:
+    0 18px 34px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(18px);
+}
+
+.topbar-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.topbar-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.topbar-title-wrap h1 {
+  margin: 0;
+  font-size: 31px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.topbar-title-wrap p {
+  margin: 0;
+  max-width: 680px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.topbar-message {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.topbar-message:empty {
+  display: none;
+}
+
+.topbar-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  text-decoration: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(20, 27, 39, 0.42);
+}
+
+.topbar-badge:hover {
+  border-color: rgba(249, 115, 22, 0.35);
+  color: #fff;
+}
+
+.topbar-badge.update {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.14);
+  color: rgba(253, 230, 138, 0.98);
+}
+
+.topbar-badge.update:hover {
+  border-color: rgba(245, 158, 11, 0.55);
+}
+
+.content-canvas {
+  padding: 18px 18px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0 0 28px 28px;
+  background:
+    linear-gradient(180deg, rgba(12, 14, 18, 0.98), rgba(7, 8, 10, 1)),
+    radial-gradient(920px 420px at 0% 0%, rgba(249, 115, 22, 0.05), transparent 62%);
+  box-shadow:
+    0 22px 44px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 .dashboard-header {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 10px;
-  margin-bottom: 14px;
+  display: none;
 }
 
 .dashboard-brand {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 14px;
 }
@@ -1289,19 +1420,21 @@ body {
 .dashboard-actions {
   margin-bottom: 0;
   min-height: 0;
-  justify-content: flex-start;
+  justify-content: flex-end;
   flex: none;
   width: auto;
 }
 
 .content-section {
-  padding: 18px 0 0;
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .mobile-nav {
   display: none;
-  margin-top: 6px;
-  margin-bottom: 6px;
+  width: 100%;
+  margin: 0 0 14px;
 }
 
 .toggle-chip {
@@ -1351,7 +1484,7 @@ body {
 }
 
 #msg {
-  min-height: 18px;
+  min-height: 0;
 }
 
 .empty-state-card {
@@ -1561,6 +1694,10 @@ body {
 .settings-instance-card,
 #settings-tab-empty {
   margin-top: 0;
+}
+
+.sidebar-badges {
+  margin-top: auto;
 }
 
 .history-empty {
@@ -1776,7 +1913,15 @@ body {
 
 @media (max-width: 1150px) {
   .main {
-    padding-inline: 16px;
+    padding: 16px 16px 36px 0;
+  }
+
+  .topbar {
+    padding-inline: 18px;
+  }
+
+  .topbar-title-wrap h1 {
+    font-size: 28px;
   }
 
   .metrics-grid {
@@ -1789,27 +1934,38 @@ body {
     padding: 0 14px 104px;
   }
 
+  .topbar,
+  .content-canvas,
   .mobile-nav,
   .content-section {
     width: 100%;
   }
 
-  .dashboard-brand {
-    gap: 12px;
+  .topbar {
+    padding: 16px 16px 14px;
+    border-radius: 20px 20px 0 0;
   }
 
-  .dashboard-brand-logo {
-    width: 64px;
-    height: 64px;
-    border-radius: 16px;
+  .topbar-copy,
+  .topbar-actions {
+    width: 100%;
   }
 
-  .dashboard-brand-copy h1 {
-    font-size: 28px;
+  .topbar-title-wrap h1 {
+    font-size: 24px;
   }
 
-  .dashboard-brand-tagline {
+  .topbar-title-wrap p {
     font-size: 12px;
+  }
+
+  .topbar-actions {
+    justify-content: flex-start;
+  }
+
+  .content-canvas {
+    padding: 14px 14px 20px;
+    border-radius: 0 0 20px 20px;
   }
 
   .mobile-nav {
@@ -1820,8 +1976,8 @@ body {
     position: sticky;
     top: 0;
     z-index: 30;
-    padding: 8px 0 10px;
-    background: linear-gradient(180deg, rgba(9, 10, 12, 0.96), rgba(9, 10, 12, 0.72));
+    padding: 0 0 10px;
+    background: linear-gradient(180deg, rgba(12, 14, 18, 0.98), rgba(12, 14, 18, 0.82));
     backdrop-filter: blur(12px);
   }
 
@@ -1872,6 +2028,24 @@ body {
 @media (max-width: 640px) {
   .actions {
     align-items: stretch;
+  }
+
+  .topbar {
+    padding-inline: 14px;
+  }
+
+  .topbar-actions {
+    gap: 8px;
+  }
+
+  .topbar-badge,
+  .topbar .chip {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .topbar-message {
+    width: 100%;
   }
 
   .settings-tabs .tab-btn,

@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import requests
 from flask import Flask, jsonify, request, send_file
 
 from .arr import ArrRequestError
@@ -64,7 +65,25 @@ def _normalize_sonarr_missing_mode(value: Any) -> str:
     return "smart"
 
 
+def _normalize_date_format(value: Any) -> str:
+    fmt = str(value or "").strip().lower()
+    if fmt in ("us", "mdy", "mm/dd/yyyy"):
+        return "us"
+    if fmt in ("eu", "dmy", "dd/mm/yyyy"):
+        return "eu"
+    return "iso"
+
+
+def _normalize_time_format(value: Any) -> str:
+    fmt = str(value or "").strip().lower()
+    if fmt in ("12h", "12", "12hr", "12-hour"):
+        return "12h"
+    return "24h"
+
+
 def _config_view(config: RuntimeConfig, store: StateStore) -> dict[str, Any]:
+    app_overrides = store.get_ui_app_settings()
+
     def _instance_row(app: str, inst) -> dict[str, Any]:
         return {
             "app": app,
@@ -115,6 +134,8 @@ def _config_view(config: RuntimeConfig, store: StateStore) -> dict[str, Any]:
     return {
         "app": {
             "quiet_hours_timezone": str(getattr(config.app, "quiet_hours_timezone", "") or ""),
+            "date_format": _normalize_date_format(app_overrides.get("date_format")),
+            "time_format": _normalize_time_format(app_overrides.get("time_format")),
         },
         "instances": rows,
     }
@@ -305,8 +326,20 @@ def create_app(config_path: str) -> Flask:
         """
         existing = store.get_all_ui_instance_settings()
         app_existing = store.get_ui_app_settings()
-        if not str(app_existing.get("quiet_hours_timezone") or "").strip():
-            store.set_ui_app_settings(quiet_hours_timezone=str(cfg.app.quiet_hours_timezone or "").strip())
+        current_qtz = str(app_existing.get("quiet_hours_timezone") or "").strip()
+        stored_date_format = str(app_existing.get("date_format") or "").strip().lower()
+        stored_time_format = str(app_existing.get("time_format") or "").strip().lower()
+        if (
+            not app_existing
+            or (not current_qtz and str(cfg.app.quiet_hours_timezone or "").strip())
+            or stored_date_format not in ("iso", "us", "eu")
+            or stored_time_format not in ("12h", "24h")
+        ):
+            store.set_ui_app_settings(
+                quiet_hours_timezone=current_qtz or str(cfg.app.quiet_hours_timezone or "").strip(),
+                date_format=_normalize_date_format(stored_date_format),
+                time_format=_normalize_time_format(stored_time_format),
+            )
 
         def _seed_instance(app_type: str, inst: Any) -> None:
             key = (app_type, int(inst.instance_id))
@@ -565,6 +598,149 @@ def create_app(config_path: str) -> Flask:
     def _get_config() -> RuntimeConfig:
         with config_lock:
             return config
+
+    item_meta_cache: dict[tuple[str, int, str], tuple[float, dict[str, str]]] = {}
+    item_meta_cache_lock = threading.Lock()
+
+    def _find_instance(cfg: RuntimeConfig, app_type: str, instance_id: int) -> ArrSyncInstanceConfig | None:
+        pool = cfg.radarr_instances if app_type == "radarr" else cfg.sonarr_instances if app_type == "sonarr" else []
+        for inst in pool:
+            if int(inst.instance_id) == int(instance_id):
+                return inst
+        return None
+
+    def _resolve_arr_connection(
+        cfg: RuntimeConfig, app_type: str, instance_id: int
+    ) -> tuple[str, str, int, bool] | None:
+        inst = _find_instance(cfg, app_type, instance_id)
+        if inst is None:
+            return None
+        base_url = str(getattr(inst.arr, "url", "") or "").strip().rstrip("/")
+        api_key = str(store.get_arr_api_key(app_type, instance_id) or getattr(inst.arr, "api_key", "") or "").strip()
+        if not base_url or not api_key:
+            return None
+        return (
+            base_url,
+            api_key,
+            max(5, int(cfg.app.request_timeout_seconds or 30)),
+            bool(cfg.app.verify_ssl),
+        )
+
+    def _arr_json_request(
+        base_url: str, api_key: str, timeout_seconds: int, verify_ssl: bool, path: str
+    ) -> dict[str, Any] | list[Any] | None:
+        try:
+            resp = requests.get(
+                f"{base_url}{path}",
+                headers={"X-Api-Key": api_key},
+                timeout=timeout_seconds,
+                verify=verify_ssl,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except (requests.RequestException, ValueError):
+            return None
+
+    def _pick_cover_url(base_url: str, payload: dict[str, Any]) -> str | None:
+        direct = str(payload.get("remotePoster") or "").strip()
+        if direct:
+            return direct
+        images = payload.get("images") if isinstance(payload.get("images"), list) else []
+        poster: dict[str, Any] | None = None
+        for row in images:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("coverType") or "").strip().lower() == "poster":
+                poster = row
+                break
+        if poster is None:
+            for row in images:
+                if isinstance(row, dict) and (row.get("url") or row.get("remoteUrl")):
+                    poster = row
+                    break
+        if poster is None:
+            return None
+        for key in ("remoteUrl", "url"):
+            value = str(poster.get(key) or "").strip()
+            if value:
+                if value.startswith("http://") or value.startswith("https://"):
+                    return value
+                return f"{base_url}{value if value.startswith('/') else '/' + value}"
+        return None
+
+    def _resolve_item_resource(cfg: RuntimeConfig, app_type: str, instance_id: int, item_key: str) -> tuple[str, dict[str, Any], str | None] | None:
+        conn = _resolve_arr_connection(cfg, app_type, instance_id)
+        if conn is None:
+            return None
+        base_url, api_key, timeout_seconds, verify_ssl = conn
+        key = str(item_key or "").strip().lower()
+        payload: dict[str, Any] | None = None
+        item_url: str | None = None
+        if app_type == "radarr" and key.startswith("movie:"):
+            try:
+                movie_id = int(key.split(":", 1)[1] or 0)
+            except (TypeError, ValueError):
+                return None
+            if movie_id <= 0:
+                return None
+            raw = _arr_json_request(base_url, api_key, timeout_seconds, verify_ssl, f"/api/v3/movie/{movie_id}")
+            payload = raw if isinstance(raw, dict) else None
+            if payload:
+                title_slug = str(payload.get("titleSlug") or "").strip()
+                item_url = f"{base_url}/movie/{title_slug}" if title_slug else f"{base_url}/movie/{movie_id}"
+        elif app_type == "sonarr":
+            if key.startswith("series:") or key.startswith("season:"):
+                parts = key.split(":")
+                if len(parts) < 2:
+                    return None
+                try:
+                    series_id = int(parts[1] or 0)
+                except (TypeError, ValueError):
+                    return None
+            elif key.startswith("episode:"):
+                try:
+                    episode_id = int(key.split(":", 1)[1] or 0)
+                except (TypeError, ValueError):
+                    return None
+                if episode_id <= 0:
+                    return None
+                episode_raw = _arr_json_request(base_url, api_key, timeout_seconds, verify_ssl, f"/api/v3/episode/{episode_id}")
+                episode = episode_raw if isinstance(episode_raw, dict) else None
+                series_id = int((episode or {}).get("seriesId") or 0)
+            else:
+                return None
+            if series_id <= 0:
+                return None
+            raw = _arr_json_request(base_url, api_key, timeout_seconds, verify_ssl, f"/api/v3/series/{series_id}")
+            payload = raw if isinstance(raw, dict) else None
+            if payload:
+                title_slug = str(payload.get("titleSlug") or "").strip()
+                item_url = f"{base_url}/series/{title_slug}" if title_slug else f"{base_url}/series/{series_id}"
+        if not payload:
+            return None
+        return base_url, payload, item_url
+
+    def _resolve_item_meta(cfg: RuntimeConfig, app_type: str, instance_id: int, item_key: str) -> dict[str, str]:
+        cache_key = (str(app_type).strip().lower(), int(instance_id), str(item_key or "").strip())
+        now = time.time()
+        with item_meta_cache_lock:
+            cached = item_meta_cache.get(cache_key)
+            if cached and cached[0] > now:
+                return dict(cached[1])
+        resolved = _resolve_item_resource(cfg, app_type, instance_id, item_key)
+        if resolved is None:
+            empty = {"cover_url": "", "item_url": ""}
+            with item_meta_cache_lock:
+                item_meta_cache[cache_key] = (now + 300, empty)
+            return empty
+        base_url, payload, item_url = resolved
+        meta = {
+            "cover_url": _pick_cover_url(base_url, payload) or "",
+            "item_url": str(item_url or "").strip(),
+        }
+        with item_meta_cache_lock:
+            item_meta_cache[cache_key] = (now + 1800, meta)
+        return dict(meta)
 
     def _reload_config() -> None:
         nonlocal config
@@ -878,7 +1054,7 @@ def create_app(config_path: str) -> Flask:
           <span class="topbar-message" id="msg"></span>
           <div class="actions dashboard-actions">
             <label class="chip toggle-chip">
-              <input id="autorun-toggle" type="checkbox" checked />
+              <input id="autorun-toggle" name="seekarr_autorun_toggle" type="checkbox" checked />
               Auto-run
             </label>
           </div>
@@ -912,7 +1088,7 @@ def create_app(config_path: str) -> Flask:
             <h3>Recent Actions</h3>
             <div class="subline">Across all configured instances</div>
           </div>
-          <div id="recent-actions" class="mono">-</div>
+          <div id="recent-actions" class="recent-actions-list">-</div>
         </div>
       </section>
 
@@ -962,11 +1138,28 @@ def create_app(config_path: str) -> Flask:
                 <h4>Global Preferences</h4>
                 <div class="subline">Shared settings used across every configured instance.</div>
               </div>
-              <div class="field settings-global-field">
-                <div class="label">Quiet Hours Timezone</div>
-                <input id="settings-quiet-timezone" class="cfg mono" type="text" list="timezone-options"
-                       placeholder="Search timezone (example: America/New_York)"/>
-                <datalist id="timezone-options"></datalist>
+              <div class="settings-global-preferences-grid">
+                <div class="field settings-global-field">
+                  <div class="label">Date Format</div>
+                  <select id="settings-date-format" name="seekarr_date_format" class="cfg">
+                    <option value="iso">YYYY-MM-DD</option>
+                    <option value="us">MM/DD/YYYY</option>
+                    <option value="eu">DD/MM/YYYY</option>
+                  </select>
+                </div>
+                <div class="field settings-global-field">
+                  <div class="label">Clock Format</div>
+                  <select id="settings-time-format" name="seekarr_time_format" class="cfg">
+                    <option value="24h">24-hour</option>
+                    <option value="12h">12-hour</option>
+                  </select>
+                </div>
+                <div class="field settings-global-field settings-global-field-wide">
+                  <div class="label">Quiet Hours Timezone</div>
+                  <input id="settings-quiet-timezone" name="seekarr_quiet_timezone" class="cfg mono" type="text" list="timezone-options"
+                         placeholder="Search timezone (example: America/New_York)"/>
+                  <datalist id="timezone-options"></datalist>
+                </div>
               </div>
               <div class="subline settings-global-help">
                 Used for quiet start/end evaluation. Leave empty to use server/container local timezone.
@@ -993,6 +1186,8 @@ def create_app(config_path: str) -> Flask:
     let timersStarted = false;
     let timezoneOptionsLoaded = false;
     let activeTimeZone = '';
+    let activeDateFormat = 'iso';
+    let activeClockFormat = '24h';
     let refreshTimer = null;
     let countdownTimer = null;
     let settingsBaseline = '';
@@ -1000,6 +1195,7 @@ def create_app(config_path: str) -> Flask:
     let settingsStatusMessage = '';
     let deleteInstanceTarget = null;
     let toastSeq = 0;
+    const recentItemMetaCache = new Map();
     const authStorageKey = 'seekarr_auth_header';
     const timezoneFallback = [
       'UTC', 'Etc/UTC',
@@ -1287,6 +1483,61 @@ def create_app(config_path: str) -> Flask:
       settingsStatusMessage = message;
       syncSettingsSaveFab();
     }
+    async function fetchRecentActionMeta(appType, instanceId, itemKey) {
+      const cacheKey = `${String(appType)}:${String(instanceId)}:${String(itemKey || '')}`;
+      if (recentItemMetaCache.has(cacheKey)) return recentItemMetaCache.get(cacheKey);
+      const resp = await apiFetch(
+        `/api/item_meta?app=${encodeURIComponent(String(appType))}&instance_id=${encodeURIComponent(String(instanceId))}&item_key=${encodeURIComponent(String(itemKey || ''))}`,
+        { cache: 'default' }
+      );
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || `meta ${resp.status}`);
+      recentItemMetaCache.set(cacheKey, data || {});
+      return data || {};
+    }
+    async function hydrateRecentActionCards() {
+      const rows = Array.from(document.querySelectorAll('.recent-action-row[data-app][data-instance-id][data-item-key]'));
+      await Promise.all(rows.map(async (row) => {
+        const appType = String(row.getAttribute('data-app') || '').trim();
+        const instanceId = String(row.getAttribute('data-instance-id') || '').trim();
+        const itemKey = String(row.getAttribute('data-item-key') || '').trim();
+        if (!appType || !instanceId || !itemKey) return;
+        try {
+          const meta = await fetchRecentActionMeta(appType, instanceId, itemKey);
+          const button = row.querySelector('.recent-action-link');
+          if (button && meta.item_url) button.setAttribute('data-item-url', String(meta.item_url));
+          const wrap = row.querySelector('.recent-action-cover-wrap');
+          if (wrap && meta.cover_url) {
+            wrap.innerHTML = `<img class="recent-action-cover" src="${String(meta.cover_url)}" alt="">`;
+            wrap.classList.remove('is-empty');
+          } else if (wrap) {
+            row.classList.add('no-cover');
+            wrap.classList.add('is-empty');
+            wrap.innerHTML = '';
+          }
+        } catch (e) {
+          const wrap = row.querySelector('.recent-action-cover-wrap');
+          row.classList.add('no-cover');
+          if (wrap) {
+            wrap.classList.add('is-empty');
+            wrap.innerHTML = '';
+          }
+        }
+      }));
+    }
+    async function openRecentActionItem(appType, instanceId, itemKey) {
+      if (!appType || !instanceId || !itemKey) return;
+      try {
+        const data = await fetchRecentActionMeta(appType, instanceId, itemKey);
+        if (!data.item_url) {
+          showToast('Open Failed', data.error || 'Could not open this item in Arr.', 'error');
+          return;
+        }
+        window.open(String(data.item_url), '_blank', 'noopener,noreferrer');
+      } catch (e) {
+        showToast('Open Failed', 'Could not open this item in Arr.', 'error');
+      }
+    }
     function buildSettingsPayload() {
       const instances = [];
       document.querySelectorAll('#settings-instance-cards [data-key]').forEach(tr => {
@@ -1325,13 +1576,18 @@ def create_app(config_path: str) -> Flask:
       });
       return {
         app: {
+          date_format: normalizeDateFormat(document.getElementById('settings-date-format')?.value || 'iso'),
+          time_format: normalizeTimeFormat(document.getElementById('settings-time-format')?.value || '24h'),
           quiet_hours_timezone: String(document.getElementById('settings-quiet-timezone')?.value || '').trim(),
         },
         instances,
       };
     }
     function settingsPayloadFingerprint(payload) {
-      return JSON.stringify(payload || { app: { quiet_hours_timezone: '' }, instances: [] });
+      return JSON.stringify(payload || {
+        app: { quiet_hours_timezone: '', date_format: 'iso', time_format: '24h' },
+        instances: [],
+      });
     }
     function refreshSettingsDirtyState(message='') {
       const current = settingsPayloadFingerprint(buildSettingsPayload());
@@ -1344,29 +1600,114 @@ def create_app(config_path: str) -> Flask:
     function getTimeZoneLabel() {
       return activeTimeZone ? activeTimeZone : 'local';
     }
-    function fmtTime(iso) {
-      if (!iso) return '';
-      const t = Date.parse(iso);
-      if (!Number.isFinite(t)) return safe(iso);
-      const dt = new Date(t);
+    function normalizeDateFormat(value) {
+      const fmt = String(value || '').trim().toLowerCase();
+      if (fmt === 'us' || fmt === 'mdy' || fmt === 'mm/dd/yyyy') return 'us';
+      if (fmt === 'eu' || fmt === 'dmy' || fmt === 'dd/mm/yyyy') return 'eu';
+      return 'iso';
+    }
+    function normalizeTimeFormat(value) {
+      const fmt = String(value || '').trim().toLowerCase();
+      return (fmt === '12h' || fmt === '12' || fmt === '12hr' || fmt === '12-hour') ? '12h' : '24h';
+    }
+    function getDateTimeParts(dt, options = {}) {
+      const includeSeconds = options.includeSeconds !== false;
       const opts = {
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
         hour: '2-digit',
         minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
+        hour12: activeClockFormat === '12h',
       };
+      if (activeClockFormat === '24h') opts.hourCycle = 'h23';
+      if (includeSeconds) opts.second = '2-digit';
       if (activeTimeZone) opts.timeZone = activeTimeZone;
+      const byType = {};
+      const parts = new Intl.DateTimeFormat('en-US', opts).formatToParts(dt);
+      for (const part of parts) {
+        if (part.type !== 'literal') byType[part.type] = part.value;
+      }
+      const hourRaw = String(byType.hour || '00');
+      return {
+        year: String(byType.year || dt.getUTCFullYear()),
+        month: String(byType.month || '').padStart(2, '0'),
+        day: String(byType.day || '').padStart(2, '0'),
+        hour: activeClockFormat === '12h' ? String(Number(hourRaw) || 12) : hourRaw.padStart(2, '0'),
+        minute: String(byType.minute || '00').padStart(2, '0'),
+        second: String(byType.second || '00').padStart(2, '0'),
+        dayPeriod: String(byType.dayPeriod || '').toUpperCase(),
+      };
+    }
+    function formatDateFromParts(parts) {
+      if (activeDateFormat === 'us') return `${parts.month}/${parts.day}/${parts.year}`;
+      if (activeDateFormat === 'eu') return `${parts.day}/${parts.month}/${parts.year}`;
+      return `${parts.year}-${parts.month}-${parts.day}`;
+    }
+    function formatTimeFromParts(parts, options = {}) {
+      const includeSeconds = options.includeSeconds !== false;
+      const base = includeSeconds
+        ? `${parts.hour}:${parts.minute}:${parts.second}`
+        : `${parts.hour}:${parts.minute}`;
+      return activeClockFormat === '12h'
+        ? `${base} ${parts.dayPeriod || 'AM'}`
+        : base;
+    }
+    function fmtTime(iso, options = {}) {
+      if (!iso) return '';
+      const t = Date.parse(iso);
+      if (!Number.isFinite(t)) return safe(iso);
+      const dt = new Date(t);
       try {
-        const parts = new Intl.DateTimeFormat('en-CA', opts).formatToParts(dt);
-        const byType = {};
-        for (const p of parts) byType[p.type] = p.value;
-        return `${byType.year}-${byType.month}-${byType.day} ${byType.hour}:${byType.minute}:${byType.second}`;
+        const parts = getDateTimeParts(dt, { includeSeconds: options.includeSeconds !== false });
+        const dateLabel = formatDateFromParts(parts);
+        if (options.includeTime === false) return dateLabel;
+        const timeLabel = formatTimeFromParts(parts, { includeSeconds: options.includeSeconds !== false });
+        if (options.omitDate) return timeLabel;
+        return `${dateLabel} ${timeLabel}`;
       } catch (e) {
         return dt.toLocaleString();
       }
+    }
+    function getDisplayDateKey(value) {
+      try {
+        const parts = getDateTimeParts(value instanceof Date ? value : new Date(value), { includeSeconds: false });
+        return `${parts.year}-${parts.month}-${parts.day}`;
+      } catch (e) {
+        return '';
+      }
+    }
+    function fmtRecentActionStamp(iso) {
+      if (!iso) return '';
+      const t = Date.parse(iso);
+      if (!Number.isFinite(t)) return safe(iso);
+      const sameDay = getDisplayDateKey(new Date(t)) === getDisplayDateKey(new Date());
+      return fmtTime(iso, { includeSeconds: false, omitDate: sameDay });
+    }
+    function appLabel(app) {
+      const value = String(app || '').trim().toLowerCase();
+      if (value === 'radarr') return 'Radarr';
+      if (value === 'sonarr') return 'Sonarr';
+      return value ? value.toUpperCase() : 'Unknown';
+    }
+    function actionKindMeta(kind, itemKey) {
+      const raw = String(kind || '').trim().toLowerCase();
+      const key = String(itemKey || '').trim().toLowerCase();
+      let typeLabel = '';
+      if (key.startsWith('movie:')) typeLabel = 'Movie';
+      else if (key.startsWith('episode:')) typeLabel = 'Episode';
+      else if (key.startsWith('season:')) typeLabel = 'Season Pack';
+      else if (key.startsWith('series:')) typeLabel = 'Show Batch';
+      if (raw === 'cutoff') {
+        return { label: 'Upgrade', className: 'upgrade', typeLabel };
+      }
+      if (raw === 'monitored') {
+        return { label: 'Library Upgrade', className: 'library', typeLabel };
+      }
+      if (raw === 'missing') {
+        return { label: 'Download', className: 'download', typeLabel };
+      }
+      return { label: '', className: '', typeLabel };
     }
     const sectionMeta = {
       dashboard: {
@@ -1495,6 +1836,8 @@ def create_app(config_path: str) -> Flask:
       }
       const data = await r.json();
       activeTimeZone = String(data?.config?.app?.quiet_hours_timezone || '').trim();
+      activeDateFormat = normalizeDateFormat(data?.config?.app?.date_format);
+      activeClockFormat = normalizeTimeFormat(data?.config?.app?.time_format);
       const ver = data.version || {};
       const versionChip = document.getElementById('version-chip');
       if (versionChip) {
@@ -1713,25 +2056,47 @@ def create_app(config_path: str) -> Flask:
       runsWrap.innerHTML = tabsHtml + contentHtml;
 
       const actionsEl = document.getElementById('recent-actions');
+      const instanceNameMap = new Map(
+        instances.map(inst => [`${String(inst.app || '').toLowerCase()}:${Number(inst.instance_id || 0)}`, String(inst.instance_name || '').trim()])
+      );
       const actions = Array.isArray(data.recent_actions)
         ? data.recent_actions.map(a => ({
             ts: a.occurred_at,
             app_type: a.app_type,
+            instance_id: a.instance_id,
             instance_name: a.instance_name,
+            item_key: a.item_key,
+            action_kind: a.action_kind,
             title: a.title,
           }))
         : (Array.isArray(rs.recent_actions) ? rs.recent_actions : []);
       if (!actions.length) {
-        actionsEl.textContent = '-';
+        actionsEl.innerHTML = '<div class="recent-actions-empty">No recent searches recorded yet.</div>';
       } else {
-        const lines = actions.map(a => {
-          const ts = fmtTime(a.ts) || '--';
-          const app = (a.app_type || '').toUpperCase();
-          const inst = a.instance_name ? ` (${a.instance_name})` : '';
-          const title = a.title || '';
-          return `${ts}  ${app}${inst}  ${title}`;
-        });
-        actionsEl.textContent = lines.join('\\n');
+        actionsEl.innerHTML = actions.slice(0, 12).map(a => {
+          const appType = String(a.app_type || '').trim().toLowerCase();
+          const instanceId = Number(a.instance_id || 0);
+          const currentInstanceName = instanceNameMap.get(`${appType}:${instanceId}`) || String(a.instance_name || '').trim();
+          const sourceLabel = currentInstanceName ? `${appLabel(appType)} / ${currentInstanceName}` : appLabel(appType);
+          const kindMeta = actionKindMeta(a.action_kind, a.item_key);
+          const itemOpenArgs = `${JSON.stringify(appType)}, ${JSON.stringify(String(instanceId))}, ${JSON.stringify(String(a.item_key || ''))}`;
+          const rowClass = a.item_key ? 'recent-action-row' : 'recent-action-row no-cover';
+          return `
+            <div class="${rowClass}" data-app="${safe(appType)}" data-instance-id="${safe(String(instanceId))}" data-item-key="${safe(String(a.item_key || ''))}">
+              <div class="recent-action-cover-wrap${a.item_key ? '' : ' is-empty'}"></div>
+              <div class="recent-action-time mono" title="${safe(fmtTime(a.ts) || '')}">${safe(fmtRecentActionStamp(a.ts) || '--')}</div>
+              <div class="recent-action-main">
+                <button class="recent-action-title recent-action-link" type="button" onclick='openRecentActionItem(${itemOpenArgs}); return false;'>${safe(a.title || 'Untitled search')}</button>
+                <div class="recent-action-meta">
+                  ${kindMeta.label ? `<span class="recent-action-kind recent-action-kind-${safe(kindMeta.className)}">${safe(kindMeta.label)}</span>` : ''}
+                  ${kindMeta.typeLabel ? `<span class="recent-action-kind recent-action-kind-type">${safe(kindMeta.typeLabel)}</span>` : ''}
+                  <span class="recent-action-source">${safe(sourceLabel)}</span>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+        hydrateRecentActionCards();
       }
       tickCountdowns();
     }
@@ -1877,7 +2242,7 @@ def create_app(config_path: str) -> Flask:
       wrap.innerHTML = '';
       window.settingsInstances = sortSettingsInstances(instances);
       if (!window.settingsInstances.length) {
-        wrap.innerHTML = `<div class="card settings-tab-content empty-state-card" id="settings-tab-empty"><div class="subline">No instances configured yet. Use the add buttons above to create a Radarr or Sonarr instance.</div></div>`;
+        wrap.innerHTML = `<div class="card settings-tab-content empty-state-card" id="settings-tab-empty"><div class="subline">No instances configured yet. Use Global Settings to add a Radarr or Sonarr instance.</div></div>`;
       }
       for (const inst of window.settingsInstances) {
         const key = `${inst.app}:${inst.instance_id}`;
@@ -1889,7 +2254,7 @@ def create_app(config_path: str) -> Flask:
         const orderUi = `
               <div class="field">
                 <div class="label">Search Order</div>
-                <select class="cfg si_search_order">
+                  <select class="cfg si_search_order" name="settings_${safe(key)}_search_order">
                   <option value="smart" ${order === 'smart' ? 'selected' : ''}>Smart (Recent, Random, Oldest)</option>
                   <option value="newest" ${order === 'newest' ? 'selected' : ''}>Newest First</option>
                   <option value="random" ${order === 'random' ? 'selected' : ''}>Random</option>
@@ -1904,35 +2269,35 @@ def create_app(config_path: str) -> Flask:
                   Quiet Start (HH:MM)
                   <span class="info-icon" title="Searches will pause during quiet hours. Force runs bypass these hours."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <input class="cfg mono si_quiet_start" type="text" value="${safe(inst.quiet_hours_start)}" placeholder="23:00"/>
+                <input class="cfg mono si_quiet_start" name="settings_${safe(key)}_quiet_start" type="text" value="${safe(inst.quiet_hours_start)}" placeholder="23:00"/>
               </div>
               <div class="field">
                 <div class="label">
                   Quiet End (HH:MM)
                   <span class="info-icon" title="Searches resume after this time. Force runs bypass these hours."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <input class="cfg mono si_quiet_end" type="text" value="${safe(inst.quiet_hours_end)}" placeholder="06:00"/>
+                <input class="cfg mono si_quiet_end" name="settings_${safe(key)}_quiet_end" type="text" value="${safe(inst.quiet_hours_end)}" placeholder="06:00"/>
               </div>
               <div class="field">
                 <div class="label">
                   Hours After Release
                   <span class="info-icon" title="Minimum hours after a title's release date before Seekarr will search for it."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <input class="cfg si_after_release" type="number" min="0" value="${safe(inst.min_hours_after_release)}"/>
+                <input class="cfg si_after_release" name="settings_${safe(key)}_after_release" type="number" min="0" value="${safe(inst.min_hours_after_release)}"/>
               </div>
               <div class="field">
                 <div class="label">
                   Seconds Between
                   <span class="info-icon" title="Minimum delay in seconds between consecutive search actions to avoid hammering the indexer."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <input class="cfg si_between" type="number" min="0" value="${safe(inst.min_seconds_between_actions)}"/>
+                <input class="cfg si_between" name="settings_${safe(key)}_seconds_between" type="number" min="0" value="${safe(inst.min_seconds_between_actions)}"/>
               </div>
               <div class="field">
                 <div class="label">
                   Upgrade Source
                   <span class="info-icon" title="Wanted List = Arr's cutoff-unmet upgrade list. Monitored Items = Any monitored item that has files. Both = Combines both sources."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <select class="cfg si_upgrade_scope">
+                <select class="cfg si_upgrade_scope" name="settings_${safe(key)}_upgrade_scope">
                   <option value="wanted" ${upgradeScope === 'wanted' ? 'selected' : ''}>Wanted List</option>
                   <option value="monitored" ${upgradeScope === 'monitored' ? 'selected' : ''}>Monitored Items</option>
                   <option value="both" ${upgradeScope === 'both' ? 'selected' : ''}>Both Sources</option>
@@ -1944,27 +2309,27 @@ def create_app(config_path: str) -> Flask:
             <div class="settings-grid-auto">
               <div class="field">
                 <div class="label">Interval (min)</div>
-                <input class="cfg si_interval" type="number" min="1" value="${safe(inst.interval_minutes)}"/>
+                <input class="cfg si_interval" name="settings_${safe(key)}_interval" type="number" min="1" value="${safe(inst.interval_minutes)}"/>
               </div>
               <div class="field">
                 <div class="label">Retry (hours)</div>
-                <input class="cfg si_retry" type="number" min="1" value="${safe(inst.item_retry_hours)}"/>
+                <input class="cfg si_retry" name="settings_${safe(key)}_retry_hours" type="number" min="1" value="${safe(inst.item_retry_hours)}"/>
               </div>
               <div class="field">
                 <div class="label">Rate Window (min)</div>
-                <input class="cfg si_rate_window" type="number" min="1" value="${safe(inst.rate_window_minutes)}"/>
+                <input class="cfg si_rate_window" name="settings_${safe(key)}_rate_window" type="number" min="1" value="${safe(inst.rate_window_minutes)}"/>
               </div>
               <div class="field">
                 <div class="label">Rate Cap</div>
-                <input class="cfg si_rate_cap" type="number" min="1" value="${safe(inst.rate_cap)}"/>
+                <input class="cfg si_rate_cap" name="settings_${safe(key)}_rate_cap" type="number" min="1" value="${safe(inst.rate_cap)}"/>
               </div>
               <div class="field">
                 <div class="label">Missing Per Run</div>
-                <input class="cfg si_missing_per_run" type="number" min="0" value="${safe(inst.max_missing_actions_per_instance_per_sync)}"/>
+                <input class="cfg si_missing_per_run" name="settings_${safe(key)}_missing_per_run" type="number" min="0" value="${safe(inst.max_missing_actions_per_instance_per_sync)}"/>
               </div>
               <div class="field">
                 <div class="label">Upgrades Per Run</div>
-                <input class="cfg si_upgrades_per_run" type="number" min="0" value="${safe(inst.max_cutoff_actions_per_instance_per_sync)}"/>
+                <input class="cfg si_upgrades_per_run" name="settings_${safe(key)}_upgrades_per_run" type="number" min="0" value="${safe(inst.max_cutoff_actions_per_instance_per_sync)}"/>
               </div>
             </div>
         `;
@@ -1974,7 +2339,7 @@ def create_app(config_path: str) -> Flask:
                   Missing Mode
                   <span class="info-icon" title="Smart = auto-selects best mode. Season Packs = uses SeasonSearch API. Show Batch = EpisodeSearch for all missing eps in a show. Episode = per-episode search."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <select class="cfg si_missing_mode">
+                <select class="cfg si_missing_mode" name="settings_${safe(key)}_missing_mode">
                   <option value="smart" ${mode === 'smart' ? 'selected' : ''}>Smart</option>
                   <option value="season_packs" ${mode === 'season_packs' ? 'selected' : ''}>Season Packs</option>
                   <option value="shows" ${mode === 'shows' ? 'selected' : ''}>Show Batch</option>
@@ -1994,9 +2359,9 @@ def create_app(config_path: str) -> Flask:
                 <div class="subline mono settings-instance-url">${safe(inst.arr_url) || '-'}</div>
               </div>
               <div class="pill-row settings-toggle-group">
-                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_enabled" ${inst.enabled ? 'checked' : ''}> Enabled</label>
-                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_missing" ${inst.search_missing ? 'checked' : ''}> Missing</label>
-                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_cutoff" ${inst.search_cutoff_unmet ? 'checked' : ''}> Upgrades</label>
+                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_enabled" name="settings_${safe(key)}_enabled" ${inst.enabled ? 'checked' : ''}> Enabled</label>
+                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_missing" name="settings_${safe(key)}_missing" ${inst.search_missing ? 'checked' : ''}> Missing</label>
+                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_cutoff" name="settings_${safe(key)}_cutoff" ${inst.search_cutoff_unmet ? 'checked' : ''}> Upgrades</label>
               </div>
             </div>
 
@@ -2005,11 +2370,11 @@ def create_app(config_path: str) -> Flask:
               <div class="settings-grid-wide">
                 <div class="field">
                   <div class="label">Instance Name</div>
-                  <input class="cfg si_name" type="text" value="${safe(instanceName)}"/>
+                  <input class="cfg si_name" name="settings_${safe(key)}_name" type="text" value="${safe(instanceName)}"/>
                 </div>
                 <div class="field">
                   <div class="label">Arr URL</div>
-                  <input class="cfg mono si_url" type="text" value="${safe(inst.arr_url)}"/>
+                  <input class="cfg mono si_url" name="settings_${safe(key)}_url" type="text" value="${safe(inst.arr_url)}"/>
                 </div>
                 <div class="field">
                   <div class="label">
@@ -2017,7 +2382,7 @@ def create_app(config_path: str) -> Flask:
                     <span class="info-icon" title="Enter a new key to update it. Leave blank to keep the existing key unchanged."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                   </div>
                   <div class="inline-input settings-api-key-row">
-                    <input class="cfg mono si_apikey" type="password" value="" placeholder="${inst.api_key_set ? '********' : '(not set)'}"/>
+                    <input class="cfg mono si_apikey" name="settings_${safe(key)}_api_key" type="password" value="" placeholder="${inst.api_key_set ? '********' : '(not set)'}"/>
                     <button class="icon-btn danger" type="button" title="Delete stored API key"
                             data-clear-key="1" data-app="${safe(inst.app)}" data-id="${safe(inst.instance_id)}" ${inst.api_key_set ? '' : 'disabled'}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
@@ -2086,6 +2451,8 @@ def create_app(config_path: str) -> Flask:
       const data = await r.json();
       const appCfg = data.app || {};
       document.getElementById('settings-quiet-timezone').value = String(appCfg.quiet_hours_timezone || '').trim();
+      document.getElementById('settings-date-format').value = normalizeDateFormat(appCfg.date_format);
+      document.getElementById('settings-time-format').value = normalizeTimeFormat(appCfg.time_format);
       renderSettingsCards(data.instances || []);
       settingsBaseline = settingsPayloadFingerprint(buildSettingsPayload());
       setSettingsDirtyState(false, '');
@@ -2138,6 +2505,8 @@ def create_app(config_path: str) -> Flask:
       const target = e.target;
       if (!target || !(target instanceof HTMLElement)) return;
       if (
+        target.id === 'settings-date-format' ||
+        target.id === 'settings-time-format' ||
         target.id === 'settings-quiet-timezone' ||
         target.closest('#settings-instance-cards')
       ) {
@@ -2148,6 +2517,8 @@ def create_app(config_path: str) -> Flask:
       const target = e.target;
       if (!target || !(target instanceof HTMLElement)) return;
       if (
+        target.id === 'settings-date-format' ||
+        target.id === 'settings-time-format' ||
         target.id === 'settings-quiet-timezone' ||
         target.closest('#settings-instance-cards')
       ) {
@@ -2231,7 +2602,11 @@ def create_app(config_path: str) -> Flask:
         app_in = payload.get("app") if isinstance(payload.get("app"), dict) else {}
 
         try:
-            store.set_ui_app_settings(quiet_hours_timezone=str(app_in.get("quiet_hours_timezone") or "").strip())
+            store.set_ui_app_settings(
+                quiet_hours_timezone=str(app_in.get("quiet_hours_timezone") or "").strip(),
+                date_format=_normalize_date_format(app_in.get("date_format")),
+                time_format=_normalize_time_format(app_in.get("time_format")),
+            )
             seen_keys: set[tuple[str, int]] = set()
 
             for row in inst_in:
@@ -2335,6 +2710,21 @@ def create_app(config_path: str) -> Flask:
         with run_state_lock:
             run_state["autorun_enabled"] = enabled
         return jsonify({"autorun_enabled": enabled})
+
+    @app.get("/api/item_meta")
+    def recent_action_item_meta() -> Any:
+        app_type = str(request.args.get("app") or "").strip().lower()
+        item_key = str(request.args.get("item_key") or "").strip()
+        try:
+            instance_id = int(request.args.get("instance_id") or 0)
+        except (TypeError, ValueError):
+            instance_id = 0
+        if app_type not in ("radarr", "sonarr") or instance_id <= 0 or not item_key:
+            return jsonify({"error": "Invalid item"}), 404
+        meta = _resolve_item_meta(_get_config(), app_type, instance_id, item_key)
+        if not meta.get("item_url") and not meta.get("cover_url"):
+            return jsonify({"error": "Item link unavailable"}), 404
+        return jsonify(meta)
 
     @app.get("/favicon.ico")
     def favicon() -> Any:

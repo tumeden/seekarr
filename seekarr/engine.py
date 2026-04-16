@@ -1259,6 +1259,7 @@ class Engine:
                 instance_id=instance.instance_id,
                 instance_name=instance.instance_name,
                 item_key=item_key,
+                action_kind=str(getattr(wanted_item, "wanted_kind", "missing") or "missing"),
                 title=title,
             )
             self.logger.info("Triggered %s search: %s (%s)", app_type, title, instance.instance_name)
@@ -1392,6 +1393,7 @@ class Engine:
                 instance_id=instance.instance_id,
                 instance_name=instance.instance_name,
                 item_key=item_key,
+                action_kind="missing",
                 title=title,
             )
             self.logger.info("Triggered sonarr season search: %s (%s)", title, instance.instance_name)
@@ -1525,6 +1527,7 @@ class Engine:
                 instance_id=instance.instance_id,
                 instance_name=instance.instance_name,
                 item_key=item_key,
+                action_kind="missing",
                 title=title,
             )
             self.logger.info("Triggered sonarr show batch search: %s (%s)", title, instance.instance_name)

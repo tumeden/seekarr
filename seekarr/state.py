@@ -71,6 +71,7 @@ class StateStore:
                     instance_id INTEGER NOT NULL,
                     instance_name TEXT,
                     item_key TEXT,
+                    action_kind TEXT,
                     title TEXT NOT NULL,
                     occurred_at TEXT NOT NULL
                 );
@@ -108,6 +109,8 @@ class StateStore:
                 CREATE TABLE IF NOT EXISTS ui_app_settings (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     quiet_hours_timezone TEXT,
+                    date_format TEXT,
+                    time_format TEXT,
                     updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS ui_instance_settings (
@@ -136,6 +139,14 @@ class StateStore:
                 );
                 """
             )
+            app_cols = {str(row["name"]).strip().lower() for row in conn.execute("PRAGMA table_info(ui_app_settings)")}
+            if "date_format" not in app_cols:
+                conn.execute("ALTER TABLE ui_app_settings ADD COLUMN date_format TEXT")
+            if "time_format" not in app_cols:
+                conn.execute("ALTER TABLE ui_app_settings ADD COLUMN time_format TEXT")
+            search_action_cols = {str(row["name"]).strip().lower() for row in conn.execute("PRAGMA table_info(search_action)")}
+            if "action_kind" not in search_action_cols:
+                conn.execute("ALTER TABLE search_action ADD COLUMN action_kind TEXT")
             cols = {str(row["name"]).strip().lower() for row in conn.execute("PRAGMA table_info(ui_instance_settings)")}
             if "instance_name" not in cols:
                 conn.execute("ALTER TABLE ui_instance_settings ADD COLUMN instance_name TEXT")
@@ -262,24 +273,40 @@ class StateStore:
 
     def get_ui_app_settings(self) -> dict[str, Any]:
         with self._connect() as conn:
-            row = conn.execute("SELECT quiet_hours_timezone FROM ui_app_settings WHERE id = 1").fetchone()
+            row = conn.execute(
+                "SELECT quiet_hours_timezone, date_format, time_format FROM ui_app_settings WHERE id = 1"
+            ).fetchone()
         if not row:
             return {}
         return {
             "quiet_hours_timezone": (str(row["quiet_hours_timezone"]).strip() if row["quiet_hours_timezone"] else ""),
+            "date_format": (str(row["date_format"]).strip() if row["date_format"] else ""),
+            "time_format": (str(row["time_format"]).strip() if row["time_format"] else ""),
         }
 
-    def set_ui_app_settings(self, quiet_hours_timezone: str | None = None) -> None:
+    def set_ui_app_settings(
+        self,
+        quiet_hours_timezone: str | None = None,
+        date_format: str | None = None,
+        time_format: str | None = None,
+    ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO ui_app_settings(id, quiet_hours_timezone, updated_at)
-                VALUES(1, ?, ?)
+                INSERT INTO ui_app_settings(id, quiet_hours_timezone, date_format, time_format, updated_at)
+                VALUES(1, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     quiet_hours_timezone=excluded.quiet_hours_timezone,
+                    date_format=excluded.date_format,
+                    time_format=excluded.time_format,
                     updated_at=excluded.updated_at
                 """,
-                (str(quiet_hours_timezone or "").strip(), _utc_now()),
+                (
+                    str(quiet_hours_timezone or "").strip(),
+                    str(date_format or "").strip(),
+                    str(time_format or "").strip(),
+                    _utc_now(),
+                ),
             )
 
     def upsert_ui_instance_settings(self, app_type: str, instance_id: int, values: dict[str, Any]) -> None:
@@ -471,19 +498,21 @@ class StateStore:
         instance_id: int,
         instance_name: str,
         item_key: str,
+        action_kind: str,
         title: str,
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO search_action(hunt_type, instance_id, instance_name, item_key, title, occurred_at)
-                VALUES(?, ?, ?, ?, ?, ?)
+                INSERT INTO search_action(hunt_type, instance_id, instance_name, item_key, action_kind, title, occurred_at)
+                VALUES(?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(hunt_type),
                     int(instance_id),
                     str(instance_name or ""),
                     str(item_key or ""),
+                    str(action_kind or "").strip(),
                     str(title or ""),
                     _utc_now(),
                 ),
@@ -493,7 +522,7 @@ class StateStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, hunt_type, instance_id, instance_name, item_key, title, occurred_at
+                SELECT id, hunt_type, instance_id, instance_name, item_key, action_kind, title, occurred_at
                 FROM search_action
                 WHERE hunt_type = ? AND instance_id = ?
                 ORDER BY id DESC
@@ -508,6 +537,7 @@ class StateStore:
                 "instance_id": int(r["instance_id"]),
                 "instance_name": r["instance_name"],
                 "item_key": r["item_key"],
+                "action_kind": r["action_kind"],
                 "title": r["title"],
                 "occurred_at": r["occurred_at"],
             }
@@ -518,8 +548,18 @@ class StateStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, hunt_type, instance_id, instance_name, item_key, title, occurred_at
-                FROM search_action
+                SELECT
+                    sa.id,
+                    sa.hunt_type,
+                    sa.instance_id,
+                    COALESCE(NULLIF(ui.instance_name, ''), NULLIF(sa.instance_name, ''), '') AS instance_name,
+                    sa.item_key,
+                    sa.action_kind,
+                    sa.title,
+                    sa.occurred_at
+                FROM search_action sa
+                LEFT JOIN ui_instance_settings ui
+                  ON ui.app_type = sa.hunt_type AND ui.instance_id = sa.instance_id
                 ORDER BY id DESC
                 LIMIT ?
                 """,
@@ -532,6 +572,7 @@ class StateStore:
                 "instance_id": int(r["instance_id"]),
                 "instance_name": r["instance_name"],
                 "item_key": r["item_key"],
+                "action_kind": r["action_kind"],
                 "title": r["title"],
                 "occurred_at": r["occurred_at"],
             }

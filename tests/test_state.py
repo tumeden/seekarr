@@ -7,9 +7,9 @@ def test_count_search_actions_for_item(tmp_path) -> None:
     store = StateStore(str(tmp_path / "seekarr.db"))
     assert store.count_search_actions_for_item("sonarr", 1, "season:10:1") == 0
 
-    store.record_search_action("sonarr", 1, "Sonarr", "season:10:1", "Show Season 01 (Pack)")
-    store.record_search_action("sonarr", 1, "Sonarr", "season:10:1", "Show Season 01 (Pack)")
-    store.record_search_action("sonarr", 1, "Sonarr", "episode:55", "Show S01E01")
+    store.record_search_action("sonarr", 1, "Sonarr", "season:10:1", "missing", "Show Season 01 (Pack)")
+    store.record_search_action("sonarr", 1, "Sonarr", "season:10:1", "missing", "Show Season 01 (Pack)")
+    store.record_search_action("sonarr", 1, "Sonarr", "episode:55", "cutoff", "Show S01E01")
 
     assert store.count_search_actions_for_item("sonarr", 1, "season:10:1") == 2
 
@@ -115,7 +115,7 @@ def test_delete_instance_removes_instance_state_and_credentials(tmp_path) -> Non
     store.mark_item_action("sonarr", 2, "episode:10", "guid-1", "Episode 10")
     store.set_next_sync_time("sonarr", 2, "2026-04-10T00:00:00+00:00")
     store.record_search_event("sonarr", 2)
-    store.record_search_action("sonarr", 2, "Sonarr Anime", "episode:10", "Episode 10")
+    store.record_search_action("sonarr", 2, "Sonarr Anime", "episode:10", "missing", "Episode 10")
     store.record_instance_run(
         cycle_run_id=1,
         hunt_type="sonarr",

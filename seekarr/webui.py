@@ -668,7 +668,9 @@ def create_app(config_path: str) -> Flask:
                 return f"{base_url}{value if value.startswith('/') else '/' + value}"
         return None
 
-    def _resolve_item_resource(cfg: RuntimeConfig, app_type: str, instance_id: int, item_key: str) -> tuple[str, dict[str, Any], str | None] | None:
+    def _resolve_item_resource(
+        cfg: RuntimeConfig, app_type: str, instance_id: int, item_key: str
+    ) -> tuple[str, dict[str, Any], str | None] | None:
         conn = _resolve_arr_connection(cfg, app_type, instance_id)
         if conn is None:
             return None
@@ -704,7 +706,9 @@ def create_app(config_path: str) -> Flask:
                     return None
                 if episode_id <= 0:
                     return None
-                episode_raw = _arr_json_request(base_url, api_key, timeout_seconds, verify_ssl, f"/api/v3/episode/{episode_id}")
+                episode_raw = _arr_json_request(
+                    base_url, api_key, timeout_seconds, verify_ssl, f"/api/v3/episode/{episode_id}"
+                )
                 episode = episode_raw if isinstance(episode_raw, dict) else None
                 series_id = int((episode or {}).get("seriesId") or 0)
             else:

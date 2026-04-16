@@ -144,7 +144,9 @@ class StateStore:
                 conn.execute("ALTER TABLE ui_app_settings ADD COLUMN date_format TEXT")
             if "time_format" not in app_cols:
                 conn.execute("ALTER TABLE ui_app_settings ADD COLUMN time_format TEXT")
-            search_action_cols = {str(row["name"]).strip().lower() for row in conn.execute("PRAGMA table_info(search_action)")}
+            search_action_cols = {
+                str(row["name"]).strip().lower() for row in conn.execute("PRAGMA table_info(search_action)")
+            }
             if "action_kind" not in search_action_cols:
                 conn.execute("ALTER TABLE search_action ADD COLUMN action_kind TEXT")
             cols = {str(row["name"]).strip().lower() for row in conn.execute("PRAGMA table_info(ui_instance_settings)")}

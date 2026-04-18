@@ -20,7 +20,7 @@ import requests
 from flask import Flask, jsonify, request, send_file
 
 from .arr import ArrRequestError
-from .config import ArrConfig, ArrSyncInstanceConfig, RuntimeConfig, load_config
+from .config import ArrConfig, ArrSyncInstanceConfig, RuntimeConfig, load_runtime_config
 from .engine import Engine, _quiet_hours_end_utc
 from .logging_utils import setup_logging
 from .state import StateStore
@@ -183,29 +183,20 @@ def _is_newer_version(current: str, latest: str) -> bool:
     return latest_tuple > cur
 
 
-def create_app(config_path: str) -> Flask:
-    config_path = str(Path(config_path).resolve())
+def create_app(db_path: str | None = None) -> Flask:
     project_dir = Path(__file__).resolve().parent.parent
-    base_config = load_config(config_path)
+    base_config = load_runtime_config(db_path)
     setup_logging(base_config.app.log_level)
     logger = logging.getLogger("seekarr.webui")
     wz = logging.getLogger("werkzeug")
     wz.addFilter(_QuietAccessFilter())
     store = StateStore(base_config.app.db_path)
 
-    def _find_base_instance(cfg: RuntimeConfig, app_type: str, instance_id: int) -> ArrSyncInstanceConfig | None:
-        instances = cfg.radarr_instances if app_type == "radarr" else cfg.sonarr_instances
-        for inst in instances:
-            if int(inst.instance_id) == int(instance_id):
-                return inst
-        return None
-
     def _materialize_db_instance(
         cfg: RuntimeConfig,
         app_type: str,
         instance_id: int,
         row: dict[str, Any],
-        base_inst: ArrSyncInstanceConfig | None = None,
     ) -> ArrSyncInstanceConfig:
         def _to_bool(value: Any, fallback: bool) -> bool:
             if value is None:
@@ -223,178 +214,60 @@ def create_app(config_path: str) -> Flask:
             except (TypeError, ValueError):
                 return fallback
 
-        base_arr = base_inst.arr if base_inst is not None else ArrConfig(enabled=True, url="", api_key="")
-        enabled = _to_bool(row.get("enabled"), base_inst.enabled if base_inst is not None else True)
-        interval_minutes = max(
-            15, min(60, _to_int(row.get("interval_minutes"), base_inst.interval_minutes if base_inst else 15))
-        )
-        instance_name = str(row.get("instance_name") or (base_inst.instance_name if base_inst else "")).strip()
+        enabled = _to_bool(row.get("enabled"), True)
+        interval_minutes = max(15, min(60, _to_int(row.get("interval_minutes"), 15)))
+        instance_name = str(row.get("instance_name") or "").strip()
         return ArrSyncInstanceConfig(
             instance_id=max(1, int(instance_id)),
             instance_name=instance_name or _default_instance_name(app_type, instance_id),
             enabled=enabled,
             interval_minutes=interval_minutes,
-            search_missing=_to_bool(row.get("search_missing"), base_inst.search_missing if base_inst else True),
-            search_cutoff_unmet=_to_bool(
-                row.get("search_cutoff_unmet"), base_inst.search_cutoff_unmet if base_inst else True
-            ),
-            upgrade_scope=_normalize_upgrade_scope(
-                row.get("upgrade_scope")
-                if row.get("upgrade_scope") is not None
-                else (base_inst.upgrade_scope if base_inst else "wanted")
-            ),
-            search_order=_normalize_search_order(
-                row.get("search_order")
-                if row.get("search_order") is not None
-                else (base_inst.search_order if base_inst else "smart")
-            ),
+            search_missing=_to_bool(row.get("search_missing"), True),
+            search_cutoff_unmet=_to_bool(row.get("search_cutoff_unmet"), True),
+            upgrade_scope=_normalize_upgrade_scope(row.get("upgrade_scope")),
+            search_order=_normalize_search_order(row.get("search_order")),
             quiet_hours_start=str(
                 row.get("quiet_hours_start")
                 if row.get("quiet_hours_start") is not None
-                else (
-                    base_inst.quiet_hours_start
-                    if base_inst and base_inst.quiet_hours_start is not None
-                    else cfg.app.quiet_hours_start
-                )
+                else cfg.app.quiet_hours_start
             ).strip(),
             quiet_hours_end=str(
                 row.get("quiet_hours_end")
                 if row.get("quiet_hours_end") is not None
-                else (
-                    base_inst.quiet_hours_end
-                    if base_inst and base_inst.quiet_hours_end is not None
-                    else cfg.app.quiet_hours_end
-                )
+                else cfg.app.quiet_hours_end
             ).strip(),
             min_hours_after_release=_to_int(
                 row.get("min_hours_after_release"),
-                base_inst.min_hours_after_release
-                if base_inst and base_inst.min_hours_after_release is not None
-                else cfg.app.min_hours_after_release,
+                cfg.app.min_hours_after_release,
             ),
             min_seconds_between_actions=_to_int(
                 row.get("min_seconds_between_actions"),
-                base_inst.min_seconds_between_actions
-                if base_inst and base_inst.min_seconds_between_actions is not None
-                else cfg.app.min_seconds_between_actions,
+                cfg.app.min_seconds_between_actions,
             ),
             max_missing_actions_per_instance_per_sync=_to_int(
                 row.get("max_missing_actions_per_instance_per_sync"),
-                base_inst.max_missing_actions_per_instance_per_sync
-                if base_inst and base_inst.max_missing_actions_per_instance_per_sync is not None
-                else cfg.app.max_missing_actions_per_instance_per_sync,
+                cfg.app.max_missing_actions_per_instance_per_sync,
             ),
             max_cutoff_actions_per_instance_per_sync=_to_int(
                 row.get("max_cutoff_actions_per_instance_per_sync"),
-                base_inst.max_cutoff_actions_per_instance_per_sync
-                if base_inst and base_inst.max_cutoff_actions_per_instance_per_sync is not None
-                else cfg.app.max_cutoff_actions_per_instance_per_sync,
+                cfg.app.max_cutoff_actions_per_instance_per_sync,
             ),
-            sonarr_missing_mode=_normalize_sonarr_missing_mode(
-                row.get("sonarr_missing_mode")
-                if row.get("sonarr_missing_mode") is not None
-                else (base_inst.sonarr_missing_mode if base_inst else "smart")
-            ),
+            sonarr_missing_mode=_normalize_sonarr_missing_mode(row.get("sonarr_missing_mode")),
             item_retry_hours=_to_int(
                 row.get("item_retry_hours"),
-                base_inst.item_retry_hours
-                if base_inst and base_inst.item_retry_hours is not None
-                else cfg.app.item_retry_hours,
+                cfg.app.item_retry_hours,
             ),
             rate_window_minutes=_to_int(
                 row.get("rate_window_minutes"),
-                base_inst.rate_window_minutes
-                if base_inst and base_inst.rate_window_minutes is not None
-                else cfg.app.rate_window_minutes,
+                cfg.app.rate_window_minutes,
             ),
-            rate_cap=_to_int(
-                row.get("rate_cap"),
-                base_inst.rate_cap if base_inst and base_inst.rate_cap is not None else cfg.app.rate_cap_per_instance,
-            ),
+            rate_cap=_to_int(row.get("rate_cap"), cfg.app.rate_cap_per_instance),
             arr=ArrConfig(
                 enabled=enabled,
-                url=str(row.get("arr_url") or base_arr.url or "").strip(),
-                api_key=str(base_arr.api_key or "").strip(),
+                url=str(row.get("arr_url") or "").strip(),
+                api_key="",
             ),
         )
-
-    def _bootstrap_ui_settings_from_yaml(cfg: RuntimeConfig) -> None:
-        """
-        One-time migration path:
-        - Seed DB-backed UI settings from YAML-configured values when missing.
-        - Never overwrite existing DB values.
-        """
-        existing = store.get_all_ui_instance_settings()
-        app_existing = store.get_ui_app_settings()
-        current_qtz = str(app_existing.get("quiet_hours_timezone") or "").strip()
-        stored_date_format = str(app_existing.get("date_format") or "").strip().lower()
-        stored_time_format = str(app_existing.get("time_format") or "").strip().lower()
-        if (
-            not app_existing
-            or (not current_qtz and str(cfg.app.quiet_hours_timezone or "").strip())
-            or stored_date_format not in ("iso", "us", "eu")
-            or stored_time_format not in ("12h", "24h")
-        ):
-            store.set_ui_app_settings(
-                quiet_hours_timezone=current_qtz or str(cfg.app.quiet_hours_timezone or "").strip(),
-                date_format=_normalize_date_format(stored_date_format),
-                time_format=_normalize_time_format(stored_time_format),
-            )
-
-        def _seed_instance(app_type: str, inst: Any) -> None:
-            key = (app_type, int(inst.instance_id))
-            if key not in existing:
-                store.upsert_ui_instance_settings(
-                    app_type,
-                    int(inst.instance_id),
-                    {
-                        "instance_name": str(
-                            inst.instance_name or _default_instance_name(app_type, int(inst.instance_id))
-                        ).strip(),
-                        "enabled": 1 if bool(inst.enabled) else 0,
-                        "interval_minutes": int(inst.interval_minutes),
-                        "search_missing": 1 if bool(inst.search_missing) else 0,
-                        "search_cutoff_unmet": 1 if bool(inst.search_cutoff_unmet) else 0,
-                        "upgrade_scope": str(getattr(inst, "upgrade_scope", "wanted") or "wanted").strip().lower(),
-                        "search_order": str(inst.search_order or "smart").strip().lower(),
-                        "quiet_hours_start": str(inst.quiet_hours_start or "").strip(),
-                        "quiet_hours_end": str(inst.quiet_hours_end or "").strip(),
-                        "min_hours_after_release": (
-                            int(inst.min_hours_after_release) if inst.min_hours_after_release is not None else None
-                        ),
-                        "min_seconds_between_actions": (
-                            int(inst.min_seconds_between_actions)
-                            if inst.min_seconds_between_actions is not None
-                            else None
-                        ),
-                        "max_missing_actions_per_instance_per_sync": (
-                            int(inst.max_missing_actions_per_instance_per_sync)
-                            if inst.max_missing_actions_per_instance_per_sync is not None
-                            else None
-                        ),
-                        "max_cutoff_actions_per_instance_per_sync": (
-                            int(inst.max_cutoff_actions_per_instance_per_sync)
-                            if inst.max_cutoff_actions_per_instance_per_sync is not None
-                            else None
-                        ),
-                        "sonarr_missing_mode": str(inst.sonarr_missing_mode or "smart").strip().lower(),
-                        "item_retry_hours": int(inst.item_retry_hours) if inst.item_retry_hours is not None else None,
-                        "rate_window_minutes": (
-                            int(inst.rate_window_minutes) if inst.rate_window_minutes is not None else None
-                        ),
-                        "rate_cap": int(inst.rate_cap) if inst.rate_cap is not None else None,
-                        "arr_url": str(inst.arr.url or "").strip(),
-                    },
-                )
-            if (not store.has_arr_api_key(app_type, int(inst.instance_id))) and str(inst.arr.api_key or "").strip():
-                store.set_arr_api_key(app_type, int(inst.instance_id), str(inst.arr.api_key).strip())
-
-        for inst in cfg.radarr_instances:
-            _seed_instance("radarr", inst)
-        for inst in cfg.sonarr_instances:
-            _seed_instance("sonarr", inst)
-
-    _bootstrap_ui_settings_from_yaml(base_config)
 
     def _with_ui_overrides(cfg: RuntimeConfig) -> RuntimeConfig:
         app_overrides = store.get_ui_app_settings()
@@ -402,24 +275,16 @@ def create_app(config_path: str) -> Flask:
         app_cfg = replace(cfg.app, quiet_hours_timezone=qtz or cfg.app.quiet_hours_timezone)
 
         raw_overrides = store.get_all_ui_instance_settings()
-        if raw_overrides:
-            radarr_instances = [
-                _materialize_db_instance(
-                    cfg, "radarr", instance_id, row, _find_base_instance(cfg, "radarr", instance_id)
-                )
-                for (app_type, instance_id), row in sorted(raw_overrides.items())
-                if app_type == "radarr"
-            ]
-            sonarr_instances = [
-                _materialize_db_instance(
-                    cfg, "sonarr", instance_id, row, _find_base_instance(cfg, "sonarr", instance_id)
-                )
-                for (app_type, instance_id), row in sorted(raw_overrides.items())
-                if app_type == "sonarr"
-            ]
-        else:
-            radarr_instances = list(cfg.radarr_instances)
-            sonarr_instances = list(cfg.sonarr_instances)
+        radarr_instances = [
+            _materialize_db_instance(cfg, "radarr", instance_id, row)
+            for (app_type, instance_id), row in sorted(raw_overrides.items())
+            if app_type == "radarr"
+        ]
+        sonarr_instances = [
+            _materialize_db_instance(cfg, "sonarr", instance_id, row)
+            for (app_type, instance_id), row in sorted(raw_overrides.items())
+            if app_type == "sonarr"
+        ]
         return replace(cfg, app=app_cfg, radarr_instances=radarr_instances, sonarr_instances=sonarr_instances)
 
     config = _with_ui_overrides(base_config)
@@ -748,9 +613,7 @@ def create_app(config_path: str) -> Flask:
 
     def _reload_config() -> None:
         nonlocal config
-        new_base = load_config(config_path)
-        if Path(new_base.app.db_path).resolve() != Path(base_config.app.db_path).resolve():
-            raise ValueError("Changing app.db_path requires a restart.")
+        new_base = load_runtime_config(base_config.app.db_path)
         new_config = _with_ui_overrides(new_base)
         with config_lock:
             config = new_config
@@ -2798,7 +2661,7 @@ def create_app(config_path: str) -> Flask:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Seekarr Web UI")
-    parser.add_argument("--config", required=True, help="Path to YAML config file.")
+    parser.add_argument("--db-path", help="Path to the Seekarr SQLite database.")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8788, help="Bind port (default: 8788)")
     parser.add_argument(
@@ -2821,23 +2684,7 @@ def main() -> int:
             "(to prevent accidentally exposing API endpoints)."
         )
 
-    config_path = str(Path(args.config).resolve())
-    try:
-        dotenv_path = Path(config_path).parent / ".env"
-        if dotenv_path.exists():
-            for raw in dotenv_path.read_text(encoding="utf-8").splitlines():
-                line = raw.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                k, v = line.split("=", 1)
-                k = k.strip()
-                v = v.strip().strip('"').strip("'")
-                if k and k not in os.environ:
-                    os.environ[k] = v
-    except OSError:
-        pass
-
-    app = create_app(config_path)
+    app = create_app(args.db_path)
     # Production default: use waitress (WSGI server). This avoids Flask's dev server warnings
     # and behaves more like a real deployment on Windows/Linux.
     from waitress import serve

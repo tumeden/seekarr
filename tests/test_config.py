@@ -1,264 +1,28 @@
-from pathlib import Path
-
-from seekarr.config import load_config
+from seekarr.config import default_db_path, load_app_config, load_runtime_config
 
 
-def test_env_interpolation_and_interval_clamp(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("RADARR_API_KEY_1", "abc123")
-    monkeypatch.setenv("SONARR_API_KEY_1", "def456")
+def test_load_app_config_uses_explicit_db_path_and_env(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "seekarr.db"
+    monkeypatch.setenv("SEEKARR_REQUEST_TIMEOUT_SECONDS", "3")
+    monkeypatch.setenv("SEEKARR_VERIFY_SSL", "false")
+    monkeypatch.setenv("SEEKARR_LOG_LEVEL", "debug")
+    monkeypatch.setenv("SEEKARR_RATE_CAP_PER_INSTANCE", "25")
 
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        """
-app:
-  db_path: "./state/seekarr.db"
-  request_timeout_seconds: 30
-  verify_ssl: true
-  log_level: INFO
+    cfg = load_app_config(str(db_path))
 
-radarr:
-  instances:
-    - instance_id: 1
-      instance_name: Radarr Main
-      enabled: true
-      interval_minutes: 1
-      search_missing: true
-      search_cutoff_unmet: false
-      radarr:
-        url: http://localhost:7878
-        api_key: "${RADARR_API_KEY_1}"
-
-sonarr:
-  instances:
-    - instance_id: 1
-      instance_name: Sonarr Main
-      enabled: true
-      interval_minutes: 999
-      search_missing: true
-      search_cutoff_unmet: false
-      sonarr:
-        url: http://localhost:8989
-        api_key: "${SONARR_API_KEY_1}"
-""".lstrip(),
-        encoding="utf-8",
-    )
-
-    cfg = load_config(str(cfg_path))
-    assert cfg.radarr_instances[0].arr.api_key == "abc123"
-    assert cfg.sonarr_instances[0].arr.api_key == "def456"
-    # Interval minutes are clamped to Huntarr-like bounds (15..60)
-    assert cfg.radarr_instances[0].interval_minutes == 15
-    assert cfg.sonarr_instances[0].interval_minutes == 60
+    assert cfg.db_path == str(db_path)
+    assert cfg.request_timeout_seconds == 5
+    assert cfg.verify_ssl is False
+    assert cfg.log_level == "DEBUG"
+    assert cfg.rate_cap_per_instance == 25
 
 
-def test_dotenv_loading(tmp_path: Path, monkeypatch) -> None:
-    # Ensure dotenv loads if env var is missing.
-    monkeypatch.delenv("RADARR_API_KEY_1", raising=False)
-    (tmp_path / ".env").write_text("RADARR_API_KEY_1=fromdotenv\n", encoding="utf-8")
-
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        """
-app:
-  db_path: "./state/seekarr.db"
-  request_timeout_seconds: 30
-  verify_ssl: true
-  log_level: INFO
-
-radarr:
-  instances:
-    - instance_id: 1
-      instance_name: Radarr Main
-      enabled: true
-      interval_minutes: 15
-      search_missing: false
-      search_cutoff_unmet: false
-      radarr:
-        url: http://localhost:7878
-        api_key: "${RADARR_API_KEY_1}"
-""".lstrip(),
-        encoding="utf-8",
-    )
-
-    cfg = load_config(str(cfg_path))
-    assert cfg.radarr_instances[0].arr.api_key == "fromdotenv"
+def test_default_db_path_prefers_env(monkeypatch) -> None:
+    monkeypatch.setenv("SEEKARR_DB_PATH", "/tmp/custom-seekarr.db")
+    assert default_db_path() == "/tmp/custom-seekarr.db"
 
 
-def test_sonarr_smart_missing_mode_parsed(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        """
-app:
-  db_path: "./state/seekarr.db"
-  request_timeout_seconds: 30
-  verify_ssl: true
-  log_level: INFO
-
-sonarr:
-  instances:
-    - instance_id: 1
-      instance_name: Sonarr Main
-      enabled: true
-      interval_minutes: 25
-      search_missing: true
-      search_cutoff_unmet: false
-      sonarr_missing_mode: Smart
-      sonarr:
-        url: http://localhost:8989
-        api_key: "abc"
-""".lstrip(),
-        encoding="utf-8",
-    )
-
-    cfg = load_config(str(cfg_path))
-    assert cfg.sonarr_instances[0].sonarr_missing_mode == "smart"
-
-
-def test_upgrade_scope_parsed(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        """
-app:
-  db_path: "./state/seekarr.db"
-  request_timeout_seconds: 30
-  verify_ssl: true
-  log_level: INFO
-
-radarr:
-  instances:
-    - instance_id: 1
-      instance_name: Radarr Main
-      enabled: true
-      interval_minutes: 25
-      search_missing: false
-      search_cutoff_unmet: true
-      upgrade_scope: monitored
-      radarr:
-        url: http://localhost:7878
-        api_key: "abc"
-""".lstrip(),
-        encoding="utf-8",
-    )
-
-    cfg = load_config(str(cfg_path))
-    assert cfg.radarr_instances[0].upgrade_scope == "monitored"
-
-
-def test_upgrade_scope_legacy_all_monitored_maps_to_both(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        """
-app:
-  db_path: "./state/seekarr.db"
-  request_timeout_seconds: 30
-  verify_ssl: true
-  log_level: INFO
-
-radarr:
-  instances:
-    - instance_id: 1
-      instance_name: Radarr Main
-      enabled: true
-      interval_minutes: 25
-      search_missing: false
-      search_cutoff_unmet: true
-      upgrade_scope: all_monitored
-      radarr:
-        url: http://localhost:7878
-        api_key: "abc"
-""".lstrip(),
-        encoding="utf-8",
-    )
-
-    cfg = load_config(str(cfg_path))
-    assert cfg.radarr_instances[0].upgrade_scope == "both"
-
-
-def test_quiet_hours_timezone_parsed(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        """
-app:
-  db_path: "./state/seekarr.db"
-  request_timeout_seconds: 30
-  verify_ssl: true
-  log_level: INFO
-  quiet_hours_timezone: "America/New_York"
-
-radarr:
-  instances:
-    - instance_id: 1
-      instance_name: Radarr Main
-      enabled: true
-      interval_minutes: 15
-      search_missing: true
-      search_cutoff_unmet: true
-      radarr:
-        url: http://localhost:7878
-        api_key: "abc"
-""".lstrip(),
-        encoding="utf-8",
-    )
-
-    cfg = load_config(str(cfg_path))
-    assert cfg.app.quiet_hours_timezone == "America/New_York"
-
-
-def test_explicit_empty_instance_lists_do_not_create_legacy_defaults(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        """
-app:
-  db_path: "./state/seekarr.db"
-  request_timeout_seconds: 30
-  verify_ssl: true
-  log_level: INFO
-
-radarr:
-  instances: []
-sonarr:
-  instances: []
-""".lstrip(),
-        encoding="utf-8",
-    )
-
-    cfg = load_config(str(cfg_path))
-    assert cfg.radarr_instances == []
-    assert cfg.sonarr_instances == []
-
-
-def test_legacy_movie_hunt_and_tv_hunt_sections_are_ignored(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        """
-app:
-  db_path: "./state/seekarr.db"
-  request_timeout_seconds: 30
-  verify_ssl: true
-  log_level: INFO
-
-movie_hunt:
-  instances:
-    - instance_id: 1
-      instance_name: Legacy Movie Hunt
-      enabled: true
-      interval_minutes: 15
-      radarr:
-        url: http://localhost:7878
-        api_key: "abc"
-tv_hunt:
-  instances:
-    - instance_id: 1
-      instance_name: Legacy TV Hunt
-      enabled: true
-      interval_minutes: 15
-      sonarr:
-        url: http://localhost:8989
-        api_key: "def"
-""".lstrip(),
-        encoding="utf-8",
-    )
-
-    cfg = load_config(str(cfg_path))
+def test_load_runtime_config_starts_with_empty_instances(tmp_path) -> None:
+    cfg = load_runtime_config(str(tmp_path / "seekarr.db"))
     assert cfg.radarr_instances == []
     assert cfg.sonarr_instances == []

@@ -1,32 +1,13 @@
-import textwrap
 from pathlib import Path
 
 from seekarr.webui import create_app
 
 
-def test_settings_can_create_multiple_radarr_instances_without_yaml_instances(tmp_path: Path, monkeypatch) -> None:
+def test_settings_can_create_multiple_radarr_instances_from_empty_db(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "seekarr.db"
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        textwrap.dedent(
-            f"""
-            app:
-              db_path: "{db_path.as_posix()}"
-              request_timeout_seconds: 30
-              verify_ssl: true
-              log_level: INFO
-            radarr:
-              instances: []
-            sonarr:
-              instances: []
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
 
     monkeypatch.setenv("SEEKARR_WEBUI_PASSWORD", "password123")
-    app = create_app(str(cfg_path))
+    app = create_app(str(db_path))
     client = app.test_client()
     headers = {"X-Seekarr-Password": "password123"}
 
@@ -103,27 +84,9 @@ def test_settings_can_create_multiple_radarr_instances_without_yaml_instances(tm
 
 def test_delete_instance_endpoint_removes_instance_and_credentials(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "seekarr.db"
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        textwrap.dedent(
-            f"""
-            app:
-              db_path: "{db_path.as_posix()}"
-              request_timeout_seconds: 30
-              verify_ssl: true
-              log_level: INFO
-            radarr:
-              instances: []
-            sonarr:
-              instances: []
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
 
     monkeypatch.setenv("SEEKARR_WEBUI_PASSWORD", "password123")
-    app = create_app(str(cfg_path))
+    app = create_app(str(db_path))
     client = app.test_client()
     headers = {"X-Seekarr-Password": "password123"}
 

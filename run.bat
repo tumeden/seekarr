@@ -17,7 +17,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-python -c "import flask, yaml, waitress" >nul 2>nul
+python -c "import flask, waitress" >nul 2>nul
 if errorlevel 1 (
   echo Installing required Python packages...
   python -m pip install -r ".\requirements.txt"
@@ -28,12 +28,7 @@ if errorlevel 1 (
   )
 )
 
-if not exist ".\config.yaml" (
-  echo config.yaml not found. Seekarr will create a default config on first start.
-  echo.
-)
-
-python .\webui_main.py --config .\config.yaml
+python .\webui_main.py --db-path .\state\seekarr.db
 
 echo.
 pause

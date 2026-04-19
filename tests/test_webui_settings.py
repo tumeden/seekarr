@@ -3,13 +3,18 @@ from pathlib import Path
 from seekarr.webui import create_app
 
 
-def test_settings_can_create_multiple_radarr_instances_from_empty_db(tmp_path: Path, monkeypatch) -> None:
+def _bootstrap_password(client) -> dict[str, str]:  # noqa: ANN001
+    bootstrap = client.post("/api/auth/bootstrap", json={"password": "password123"})
+    assert bootstrap.status_code == 200
+    return {"X-Seekarr-Password": "password123"}
+
+
+def test_settings_can_create_multiple_radarr_instances_from_empty_db(tmp_path: Path) -> None:
     db_path = tmp_path / "seekarr.db"
 
-    monkeypatch.setenv("SEEKARR_WEBUI_PASSWORD", "password123")
     app = create_app(str(db_path))
     client = app.test_client()
-    headers = {"X-Seekarr-Password": "password123"}
+    headers = _bootstrap_password(client)
 
     initial = client.get("/api/settings", headers=headers)
     assert initial.status_code == 200
@@ -82,13 +87,12 @@ def test_settings_can_create_multiple_radarr_instances_from_empty_db(tmp_path: P
     ]
 
 
-def test_delete_instance_endpoint_removes_instance_and_credentials(tmp_path: Path, monkeypatch) -> None:
+def test_delete_instance_endpoint_removes_instance_and_credentials(tmp_path: Path) -> None:
     db_path = tmp_path / "seekarr.db"
 
-    monkeypatch.setenv("SEEKARR_WEBUI_PASSWORD", "password123")
     app = create_app(str(db_path))
     client = app.test_client()
-    headers = {"X-Seekarr-Password": "password123"}
+    headers = _bootstrap_password(client)
 
     seed = client.post(
         "/api/settings",

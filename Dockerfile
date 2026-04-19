@@ -25,4 +25,4 @@ USER appuser
 # - /data/seekarr.db stores state and UI-managed settings
 # - /data/seekarr.masterkey stores the encryption key for stored Arr API keys
 VOLUME ["/data"]
-CMD ["python", "webui_main.py", "--db-path", "/data/seekarr.db", "--host", "0.0.0.0", "--port", "8788", "--allow-public"]
+CMD ["python", "webui_main.py", "--db-path", "/data/seekarr.db", "--host", "0.0.0.0", "--port", "8788"]

@@ -227,14 +227,10 @@ def create_app(db_path: str | None = None) -> Flask:
             upgrade_scope=_normalize_upgrade_scope(row.get("upgrade_scope")),
             search_order=_normalize_search_order(row.get("search_order")),
             quiet_hours_start=str(
-                row.get("quiet_hours_start")
-                if row.get("quiet_hours_start") is not None
-                else cfg.app.quiet_hours_start
+                row.get("quiet_hours_start") if row.get("quiet_hours_start") is not None else cfg.app.quiet_hours_start
             ).strip(),
             quiet_hours_end=str(
-                row.get("quiet_hours_end")
-                if row.get("quiet_hours_end") is not None
-                else cfg.app.quiet_hours_end
+                row.get("quiet_hours_end") if row.get("quiet_hours_end") is not None else cfg.app.quiet_hours_end
             ).strip(),
             min_hours_after_release=_to_int(
                 row.get("min_hours_after_release"),
@@ -378,10 +374,6 @@ def create_app(db_path: str | None = None) -> Flask:
         return fallback
 
     password_hash = store.get_webui_password_hash()
-    env_pw = str(os.getenv("SEEKARR_WEBUI_PASSWORD", "") or "").strip()
-    if not password_hash and env_pw:
-        password_hash = _hash_password(env_pw)
-        store.set_webui_password_hash(password_hash)
 
     def _json_unauthorized(msg: str = "Unauthorized") -> Any:
         return jsonify({"error": msg}), 401
@@ -2662,27 +2654,9 @@ def create_app(db_path: str | None = None) -> Flask:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Seekarr Web UI")
     parser.add_argument("--db-path", help="Path to the Seekarr SQLite database.")
-    parser.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8788, help="Bind port (default: 8788)")
-    parser.add_argument(
-        "--allow-public",
-        action="store_true",
-        help="Allow binding to a non-localhost host (NOT recommended without a reverse proxy/auth).",
-    )
     args = parser.parse_args()
-
-    host = str(args.host or "").strip()
-    allow_public = bool(args.allow_public) or os.getenv("SEEKARR_ALLOW_PUBLIC_WEBUI", "0").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    if host not in ("127.0.0.1", "::1", "localhost") and not allow_public:
-        raise SystemExit(
-            f"Refusing to bind Web UI to host={host!r} without --allow-public "
-            "(to prevent accidentally exposing API endpoints)."
-        )
 
     app = create_app(args.db_path)
     # Production default: use waitress (WSGI server). This avoids Flask's dev server warnings

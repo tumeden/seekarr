@@ -19,7 +19,9 @@
   <img alt="License" src="https://img.shields.io/github/license/tumeden/seekarr?style=flat&label=License">
 </p>
 
-Seekarr automatically triggers Radarr/Sonarr searches for monitored items in your library, with scheduling, cooldowns, and rate limits.
+Seekarr keeps your Radarr and Sonarr stack actively searching for missing media and better releases over time, so you do not have to keep manually triggering searches yourself.
+
+Seekarr is configured from the Web UI. Arr instance URLs, API keys, schedules, and search behavior are stored in SQLite.
 
 <!-- screenshots -->
 <img width="1095" height="708" alt="image" src="https://github.com/user-attachments/assets/79c854f6-c56b-47c1-9737-fcf4ec551ac9" />
@@ -30,19 +32,16 @@ Seekarr automatically triggers Radarr/Sonarr searches for monitored items in you
 
 ## What It Does
 
-- Pulls missing items and upgrade candidates from Radarr/Sonarr.
-- Optionally re-searches all monitored items with files for better upgrades.
-- Triggers searches per instance on configured intervals.
-- Tracks item cooldowns in SQLite to avoid repeated spam searches.
-- Applies pacing and rate limits.
-- Skips unreleased content until the configured delay passes.
-- Supports quiet hours (with configurable timezone in Web UI).
+- Re-runs searches for monitored movies and episodes that are still missing.
+- Keeps checking for better releases when you want ongoing upgrades, not just first-time grabs.
+- Lets you set different schedules and behavior for each Radarr or Sonarr instance.
+- Helps avoid wasteful searches with release delays, quiet hours, cooldowns, and rate limits.
 
 Upgrade source modes:
 
-- `Wanted List Only`: only Arr's current upgrade candidates.
-- `Monitored Items Only`: monitored items with files, even if Arr no longer lists them as upgrades.
-- `Both`: combines Arr's upgrade candidates with monitored items that already have files.
+- `Wanted List Only`: only search items Arr is currently asking to upgrade.
+- `Monitored Items Only`: search monitored items that already have files so Seekarr can keep looking for better releases.
+- `Both`: combine Arr's current upgrade list with monitored items that already have files.
 
 ---
 
@@ -67,6 +66,8 @@ Then:
 3. Set Web UI password.
 4. Configure Radarr/Sonarr instances and settings in **Settings**. You can add or remove multiple instances for either app from the UI.
 
+By default the container stores data in `/data/seekarr.db`.
+
 ---
 
 ## Persistence
@@ -75,11 +76,12 @@ Persist `./data`.
 
 It contains:
 
-- `config.yaml` (startup/bootstrap defaults; optional import source for `radarr` and `sonarr` instance definitions)
 - `seekarr.db` (state + Web UI settings)
 - `seekarr.masterkey` (key used to decrypt stored Arr API keys)
 
 Web UI setting changes are stored in `seekarr.db`.
+
+If you need to fully reset Seekarr's configured instances and UI settings, stop the app and delete `seekarr.db`. Keep `seekarr.masterkey` unless you intentionally want to discard access to stored API keys as well.
 
 ---
 

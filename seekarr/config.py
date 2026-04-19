@@ -37,6 +37,7 @@ class ArrSyncInstanceConfig:
     search_cutoff_unmet: bool
     upgrade_scope: str
     search_order: str
+    quiet_hours_enabled: bool | None
     quiet_hours_start: str | None
     quiet_hours_end: str | None
     min_hours_after_release: int | None

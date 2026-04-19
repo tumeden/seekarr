@@ -160,6 +160,11 @@ def _quiet_hours_end_utc(
     return end_local.astimezone(timezone.utc)
 
 
+def _instance_sleep_window_enabled(instance: ArrSyncInstanceConfig) -> bool:
+    value = getattr(instance, "quiet_hours_enabled", None)
+    return True if value is None else bool(value)
+
+
 @dataclass
 class CycleStats:
     instances_due: int = 0
@@ -385,19 +390,22 @@ class Engine:
         wanted_count = 0
         status = "success"
         try:
-            quiet_start = str(getattr(instance, "quiet_hours_start", None) or self.config.app.quiet_hours_start or "")
-            quiet_end = str(getattr(instance, "quiet_hours_end", None) or self.config.app.quiet_hours_end or "")
-            quiet_tz = str(getattr(self.config.app, "quiet_hours_timezone", "") or "")
-            quiet_end_utc = _quiet_hours_end_utc(
-                datetime.now(timezone.utc),
-                quiet_start,
-                quiet_end,
-                quiet_timezone=quiet_tz,
-            )
-            if quiet_end_utc and (not force):
-                self.store.set_next_sync_time(app_type, instance.instance_id, quiet_end_utc.isoformat())
-                status = "quiet_hours"
-                return
+            if _instance_sleep_window_enabled(instance):
+                quiet_start = str(
+                    getattr(instance, "quiet_hours_start", None) or self.config.app.quiet_hours_start or ""
+                )
+                quiet_end = str(getattr(instance, "quiet_hours_end", None) or self.config.app.quiet_hours_end or "")
+                quiet_tz = str(getattr(self.config.app, "quiet_hours_timezone", "") or "")
+                quiet_end_utc = _quiet_hours_end_utc(
+                    datetime.now(timezone.utc),
+                    quiet_start,
+                    quiet_end,
+                    quiet_timezone=quiet_tz,
+                )
+                if quiet_end_utc and (not force):
+                    self.store.set_next_sync_time(app_type, instance.instance_id, quiet_end_utc.isoformat())
+                    status = "quiet_hours"
+                    return
 
             wanted = (
                 client.fetch_wanted_movies(

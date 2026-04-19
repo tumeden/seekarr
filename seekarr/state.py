@@ -123,6 +123,7 @@ class StateStore:
                     search_cutoff_unmet INTEGER,
                     upgrade_scope TEXT,
                     search_order TEXT,
+                    quiet_hours_enabled INTEGER,
                     quiet_hours_start TEXT,
                     quiet_hours_end TEXT,
                     min_hours_after_release INTEGER,
@@ -154,6 +155,8 @@ class StateStore:
                 conn.execute("ALTER TABLE ui_instance_settings ADD COLUMN instance_name TEXT")
             if "upgrade_scope" not in cols:
                 conn.execute("ALTER TABLE ui_instance_settings ADD COLUMN upgrade_scope TEXT")
+            if "quiet_hours_enabled" not in cols:
+                conn.execute("ALTER TABLE ui_instance_settings ADD COLUMN quiet_hours_enabled INTEGER")
 
     def get_webui_password_hash(self) -> str | None:
         with self._connect() as conn:
@@ -321,12 +324,13 @@ class StateStore:
                 INSERT INTO ui_instance_settings(
                     app_type, instance_id,
                     instance_name, enabled, interval_minutes, search_missing, search_cutoff_unmet, upgrade_scope, search_order,
+                    quiet_hours_enabled,
                     quiet_hours_start, quiet_hours_end,
                     min_hours_after_release, min_seconds_between_actions,
                     max_missing_actions_per_instance_per_sync, max_cutoff_actions_per_instance_per_sync,
                     sonarr_missing_mode, item_retry_hours, rate_window_minutes, rate_cap, arr_url, updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(app_type, instance_id) DO UPDATE SET
                     instance_name=excluded.instance_name,
                     enabled=excluded.enabled,
@@ -335,6 +339,7 @@ class StateStore:
                     search_cutoff_unmet=excluded.search_cutoff_unmet,
                     upgrade_scope=excluded.upgrade_scope,
                     search_order=excluded.search_order,
+                    quiet_hours_enabled=excluded.quiet_hours_enabled,
                     quiet_hours_start=excluded.quiet_hours_start,
                     quiet_hours_end=excluded.quiet_hours_end,
                     min_hours_after_release=excluded.min_hours_after_release,
@@ -358,6 +363,7 @@ class StateStore:
                     values.get("search_cutoff_unmet"),
                     values.get("upgrade_scope"),
                     values.get("search_order"),
+                    values.get("quiet_hours_enabled"),
                     values.get("quiet_hours_start"),
                     values.get("quiet_hours_end"),
                     values.get("min_hours_after_release"),
@@ -381,6 +387,7 @@ class StateStore:
                     app_type, instance_id,
                     instance_name,
                     enabled, interval_minutes, search_missing, search_cutoff_unmet, upgrade_scope, search_order,
+                    quiet_hours_enabled,
                     quiet_hours_start, quiet_hours_end,
                     min_hours_after_release, min_seconds_between_actions,
                     max_missing_actions_per_instance_per_sync, max_cutoff_actions_per_instance_per_sync,
@@ -403,6 +410,7 @@ class StateStore:
                 "search_cutoff_unmet": row["search_cutoff_unmet"],
                 "upgrade_scope": row["upgrade_scope"],
                 "search_order": row["search_order"],
+                "quiet_hours_enabled": row["quiet_hours_enabled"],
                 "quiet_hours_start": row["quiet_hours_start"],
                 "quiet_hours_end": row["quiet_hours_end"],
                 "min_hours_after_release": row["min_hours_after_release"],

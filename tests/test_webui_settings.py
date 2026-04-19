@@ -33,6 +33,7 @@ def test_settings_can_create_multiple_radarr_instances_from_empty_db(tmp_path: P
                 "search_cutoff_unmet": True,
                 "upgrade_scope": "wanted",
                 "search_order": "smart",
+                "quiet_hours_enabled": True,
                 "quiet_hours_start": "23:00",
                 "quiet_hours_end": "06:00",
                 "min_hours_after_release": 8,
@@ -55,6 +56,7 @@ def test_settings_can_create_multiple_radarr_instances_from_empty_db(tmp_path: P
                 "search_cutoff_unmet": False,
                 "upgrade_scope": "monitored",
                 "search_order": "newest",
+                "quiet_hours_enabled": False,
                 "quiet_hours_start": "22:00",
                 "quiet_hours_end": "07:00",
                 "min_hours_after_release": 12,
@@ -85,6 +87,7 @@ def test_settings_can_create_multiple_radarr_instances_from_empty_db(tmp_path: P
         "http://radarr-a:7878",
         "http://radarr-b:7878",
     ]
+    assert [row["quiet_hours_enabled"] for row in body["instances"]] == [True, False]
 
 
 def test_delete_instance_endpoint_removes_instance_and_credentials(tmp_path: Path) -> None:

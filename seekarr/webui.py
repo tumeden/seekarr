@@ -123,6 +123,36 @@ def _normalize_arr_url(value: Any, app_type: str, instance_id: int) -> str:
     return urlunsplit((parts.scheme.lower(), parts.netloc, normalized_path, "", ""))
 
 
+def _normalize_quiet_hours_enabled(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value or "").strip().lower()
+    if text in ("0", "false", "no", "off", ""):
+        return False
+    return True
+
+
+def _normalize_hhmm_or_empty(value: Any, field_label: str, app_type: str, instance_id: int) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parts = text.split(":")
+    if len(parts) != 2:
+        raise ValueError(f"{app_type.title()} instance #{instance_id} {field_label} must use HH:MM")
+    try:
+        hh = int(parts[0])
+        mm = int(parts[1])
+    except ValueError as exc:
+        raise ValueError(f"{app_type.title()} instance #{instance_id} {field_label} must use HH:MM") from exc
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        raise ValueError(f"{app_type.title()} instance #{instance_id} {field_label} must use HH:MM")
+    return f"{hh:02d}:{mm:02d}"
+
+
 def _config_view(config: RuntimeConfig, store: StateStore) -> dict[str, Any]:
     app_overrides = store.get_ui_app_settings()
 
@@ -137,6 +167,9 @@ def _config_view(config: RuntimeConfig, store: StateStore) -> dict[str, Any]:
             "search_cutoff_unmet": bool(getattr(inst, "search_cutoff_unmet", True)),
             "upgrade_scope": str(getattr(inst, "upgrade_scope", "wanted") or "wanted"),
             "search_order": str(getattr(inst, "search_order", "smart") or "smart"),
+            "quiet_hours_enabled": bool(
+                True if getattr(inst, "quiet_hours_enabled", None) is None else getattr(inst, "quiet_hours_enabled")
+            ),
             "quiet_hours_start": str(getattr(inst, "quiet_hours_start", None) or config.app.quiet_hours_start or ""),
             "quiet_hours_end": str(getattr(inst, "quiet_hours_end", None) or config.app.quiet_hours_end or ""),
             "min_hours_after_release": int(
@@ -268,6 +301,7 @@ def create_app(db_path: str | None = None) -> Flask:
             search_cutoff_unmet=_to_bool(row.get("search_cutoff_unmet"), True),
             upgrade_scope=_normalize_upgrade_scope(row.get("upgrade_scope")),
             search_order=_normalize_search_order(row.get("search_order")),
+            quiet_hours_enabled=_to_bool(row.get("quiet_hours_enabled"), True),
             quiet_hours_start=str(
                 row.get("quiet_hours_start") if row.get("quiet_hours_start") is not None else cfg.app.quiet_hours_start
             ).strip(),
@@ -753,6 +787,10 @@ def create_app(db_path: str | None = None) -> Flask:
         seconds = max(0.0, (dt.astimezone(timezone.utc) - now).total_seconds())
         time.sleep(min(seconds, max_seconds))
 
+    def _instance_sleep_window_enabled(inst: ArrSyncInstanceConfig) -> bool:
+        value = getattr(inst, "quiet_hours_enabled", None)
+        return True if value is None else bool(value)
+
     def _autorun_instance_loop(app_type: str, instance_id: int) -> None:
         # Independent per-instance scheduling (no fixed ticker).
         while True:
@@ -772,20 +810,21 @@ def create_app(db_path: str | None = None) -> Flask:
 
                 # Quiet-hours pre-check: schedule directly to quiet end so the dashboard and
                 # autorun loop both enter sleep mode immediately without an unnecessary due run.
-                quiet_start = str(getattr(inst, "quiet_hours_start", None) or config.app.quiet_hours_start or "")
-                quiet_end = str(getattr(inst, "quiet_hours_end", None) or config.app.quiet_hours_end or "")
-                quiet_tz = str(getattr(config.app, "quiet_hours_timezone", "") or "")
-                quiet_end_utc = _quiet_hours_end_utc(
-                    datetime.now(timezone.utc),
-                    quiet_start,
-                    quiet_end,
-                    quiet_timezone=quiet_tz,
-                )
-                if quiet_end_utc:
-                    quiet_iso = quiet_end_utc.isoformat()
-                    store.set_next_sync_time(app_type, instance_id, quiet_iso)
-                    _sleep_until(quiet_iso)
-                    continue
+                if _instance_sleep_window_enabled(inst):
+                    quiet_start = str(getattr(inst, "quiet_hours_start", None) or config.app.quiet_hours_start or "")
+                    quiet_end = str(getattr(inst, "quiet_hours_end", None) or config.app.quiet_hours_end or "")
+                    quiet_tz = str(getattr(config.app, "quiet_hours_timezone", "") or "")
+                    quiet_end_utc = _quiet_hours_end_utc(
+                        datetime.now(timezone.utc),
+                        quiet_start,
+                        quiet_end,
+                        quiet_timezone=quiet_tz,
+                    )
+                    if quiet_end_utc:
+                        quiet_iso = quiet_end_utc.isoformat()
+                        store.set_next_sync_time(app_type, instance_id, quiet_iso)
+                        _sleep_until(quiet_iso)
+                        continue
 
                 next_sync = store.get_next_sync_time(app_type, instance_id)
                 if next_sync:
@@ -1055,14 +1094,14 @@ def create_app(db_path: str | None = None) -> Flask:
                   </select>
                 </div>
                 <div class="field settings-global-field settings-global-field-wide">
-                  <div class="label">Quiet Hours Timezone</div>
+                  <div class="label">Sleep Window Timezone</div>
                   <input id="settings-quiet-timezone" name="seekarr_quiet_timezone" class="cfg mono" type="text" list="timezone-options"
                          placeholder="Search timezone (example: America/New_York)"/>
                   <datalist id="timezone-options"></datalist>
                 </div>
               </div>
               <div class="subline settings-global-help">
-                Used for quiet start/end evaluation. Leave empty to use server/container local timezone.
+                Used for sleep window start/end evaluation. Leave empty to use the server timezone.
               </div>
             </div>
           </div>
@@ -1477,6 +1516,7 @@ def create_app(db_path: str | None = None) -> Flask:
           search_cutoff_unmet: !!tr.querySelector('.si_cutoff')?.checked,
           upgrade_scope: String(tr.querySelector('.si_upgrade_scope')?.value || 'wanted'),
           search_order: String(tr.querySelector('.si_search_order')?.value || 'smart'),
+          quiet_hours_enabled: !!tr.querySelector('.si_quiet_enabled')?.checked,
           quiet_hours_start: String(tr.querySelector('.si_quiet_start')?.value || '').trim(),
           quiet_hours_end: String(tr.querySelector('.si_quiet_end')?.value || '').trim(),
           min_hours_after_release: Number(tr.querySelector('.si_after_release')?.value || 0),
@@ -1513,6 +1553,20 @@ def create_app(db_path: str | None = None) -> Flask:
     function refreshSettingsDirtyState(message='') {
       const current = settingsPayloadFingerprint(buildSettingsPayload());
       setSettingsDirtyState(current !== settingsBaseline, message);
+    }
+    function syncSleepWindowControls(scope=document) {
+      const root = (scope && typeof scope.querySelectorAll === 'function') ? scope : document;
+      root.querySelectorAll('.settings-instance-card').forEach(card => {
+        const toggle = card.querySelector('.si_quiet_enabled');
+        const fields = card.querySelector('.sleep-window-fields');
+        const inputs = card.querySelectorAll('.si_quiet_start, .si_quiet_end');
+        const enabled = !!toggle?.checked;
+        if (fields) fields.classList.toggle('is-disabled', !enabled);
+        inputs.forEach(input => {
+          input.disabled = !enabled;
+          input.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+        });
+      });
     }
     function confirmDiscardUnsavedSettings(actionLabel) {
       if (!settingsDirty) return true;
@@ -2159,6 +2213,7 @@ def create_app(db_path: str | None = None) -> Flask:
         search_cutoff_unmet: true,
         upgrade_scope: 'wanted',
         search_order: 'smart',
+        quiet_hours_enabled: true,
         quiet_hours_start: '23:00',
         quiet_hours_end: '06:00',
         min_hours_after_release: 8,
@@ -2211,6 +2266,57 @@ def create_app(db_path: str | None = None) -> Flask:
         const upgradeScopeRaw = String(inst.upgrade_scope || 'wanted').toLowerCase();
         const upgradeScope = (upgradeScopeRaw === 'all_monitored') ? 'both' : upgradeScopeRaw;
         const order = String(inst.search_order || 'smart').toLowerCase();
+        const sleepEnabled = (inst.quiet_hours_enabled !== false);
+        const modeUi = (inst.app === 'sonarr') ? `
+              <div class="field field-stack-gap">
+                <div class="label">
+                  Missing Mode
+                  <span class="info-icon" title="Smart auto-selects the best mode. Season Packs uses season searches. Show Batch searches all missing episodes in a show. Episode searches one episode at a time."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <select class="cfg si_missing_mode" name="settings_${safe(key)}_missing_mode">
+                  <option value="smart" ${mode === 'smart' ? 'selected' : ''}>Smart</option>
+                  <option value="season_packs" ${mode === 'season_packs' ? 'selected' : ''}>Season Packs</option>
+                  <option value="shows" ${mode === 'shows' ? 'selected' : ''}>Show Batch</option>
+                  <option value="episodes" ${mode === 'episodes' ? 'selected' : ''}>Episode</option>
+                </select>
+              </div>
+        ` : '';
+        const runScheduleUi = `
+            <div class="settings-grid-auto">
+              <div class="field">
+                <div class="label">
+                  Run Every (min)
+                  <span class="info-icon" title="How often Seekarr should check this instance on its normal schedule."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <input class="cfg si_interval" name="settings_${safe(key)}_interval" type="number" min="1" value="${safe(inst.interval_minutes)}"/>
+              </div>
+            </div>
+        `;
+        const sleepWindowUi = `
+            <div class="settings-grid-auto">
+              <div class="field field-stack-gap">
+                <div class="settings-switch-row">
+                  <label class="settings-switch">
+                    <input type="checkbox" class="si_quiet_enabled" name="settings_${safe(key)}_quiet_enabled" ${sleepEnabled ? 'checked' : ''}>
+                    <span class="settings-switch-slider" aria-hidden="true"></span>
+                    <span class="settings-switch-label">Enabled</span>
+                  </label>
+                  <span class="info-icon" title="When enabled, this instance will not run during the sleep window. Force runs still bypass it."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <div class="subline">Blocks scheduled runs between the start and end times below. Uses the global timezone configured above.</div>
+              </div>
+            </div>
+            <div class="settings-grid-auto settings-grid-spaced sleep-window-fields${sleepEnabled ? '' : ' is-disabled'}">
+              <div class="field">
+                <div class="label">Start (HH:MM)</div>
+                <input class="cfg mono si_quiet_start" name="settings_${safe(key)}_quiet_start" type="text" value="${safe(inst.quiet_hours_start)}" placeholder="23:00" ${sleepEnabled ? '' : 'disabled'} aria-disabled="${sleepEnabled ? 'false' : 'true'}"/>
+              </div>
+              <div class="field">
+                <div class="label">End (HH:MM)</div>
+                <input class="cfg mono si_quiet_end" name="settings_${safe(key)}_quiet_end" type="text" value="${safe(inst.quiet_hours_end)}" placeholder="06:00" ${sleepEnabled ? '' : 'disabled'} aria-disabled="${sleepEnabled ? 'false' : 'true'}"/>
+              </div>
+            </div>
+        `;
         const orderUi = `
               <div class="field">
                 <div class="label">Search Order</div>
@@ -2226,36 +2332,8 @@ def create_app(db_path: str | None = None) -> Flask:
             <div class="settings-grid-auto settings-grid-spaced">
               <div class="field">
                 <div class="label">
-                  Quiet Start (HH:MM)
-                  <span class="info-icon" title="Searches will pause during quiet hours. Force runs bypass these hours."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
-                </div>
-                <input class="cfg mono si_quiet_start" name="settings_${safe(key)}_quiet_start" type="text" value="${safe(inst.quiet_hours_start)}" placeholder="23:00"/>
-              </div>
-              <div class="field">
-                <div class="label">
-                  Quiet End (HH:MM)
-                  <span class="info-icon" title="Searches resume after this time. Force runs bypass these hours."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
-                </div>
-                <input class="cfg mono si_quiet_end" name="settings_${safe(key)}_quiet_end" type="text" value="${safe(inst.quiet_hours_end)}" placeholder="06:00"/>
-              </div>
-              <div class="field">
-                <div class="label">
-                  Hours After Release
-                  <span class="info-icon" title="Minimum hours after a title's release date before Seekarr will search for it."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
-                </div>
-                <input class="cfg si_after_release" name="settings_${safe(key)}_after_release" type="number" min="0" value="${safe(inst.min_hours_after_release)}"/>
-              </div>
-              <div class="field">
-                <div class="label">
-                  Seconds Between
-                  <span class="info-icon" title="Minimum delay in seconds between consecutive search actions to avoid hammering the indexer."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
-                </div>
-                <input class="cfg si_between" name="settings_${safe(key)}_seconds_between" type="number" min="0" value="${safe(inst.min_seconds_between_actions)}"/>
-              </div>
-              <div class="field">
-                <div class="label">
                   Upgrade Source
-                  <span class="info-icon" title="Wanted List = Arr's cutoff-unmet upgrade list. Monitored Items = Any monitored item that has files. Both = Combines both sources."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                  <span class="info-icon" title="Wanted List uses the Arr upgrade queue. Monitored Items checks monitored items with existing files. Both combines both sources."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
                 <select class="cfg si_upgrade_scope" name="settings_${safe(key)}_upgrade_scope">
                   <option value="wanted" ${upgradeScope === 'wanted' ? 'selected' : ''}>Wanted List</option>
@@ -2263,26 +2341,7 @@ def create_app(db_path: str | None = None) -> Flask:
                   <option value="both" ${upgradeScope === 'both' ? 'selected' : ''}>Both Sources</option>
                 </select>
               </div>
-            </div>
-        `;
-        const limitsUi = `
-            <div class="settings-grid-auto">
-              <div class="field">
-                <div class="label">Interval (min)</div>
-                <input class="cfg si_interval" name="settings_${safe(key)}_interval" type="number" min="1" value="${safe(inst.interval_minutes)}"/>
-              </div>
-              <div class="field">
-                <div class="label">Retry (hours)</div>
-                <input class="cfg si_retry" name="settings_${safe(key)}_retry_hours" type="number" min="1" value="${safe(inst.item_retry_hours)}"/>
-              </div>
-              <div class="field">
-                <div class="label">Rate Window (min)</div>
-                <input class="cfg si_rate_window" name="settings_${safe(key)}_rate_window" type="number" min="1" value="${safe(inst.rate_window_minutes)}"/>
-              </div>
-              <div class="field">
-                <div class="label">Rate Cap</div>
-                <input class="cfg si_rate_cap" name="settings_${safe(key)}_rate_cap" type="number" min="1" value="${safe(inst.rate_cap)}"/>
-              </div>
+              ${orderUi}
               <div class="field">
                 <div class="label">Missing Per Run</div>
                 <input class="cfg si_missing_per_run" name="settings_${safe(key)}_missing_per_run" type="number" min="0" value="${safe(inst.max_missing_actions_per_instance_per_sync)}"/>
@@ -2292,21 +2351,40 @@ def create_app(db_path: str | None = None) -> Flask:
                 <input class="cfg si_upgrades_per_run" name="settings_${safe(key)}_upgrades_per_run" type="number" min="0" value="${safe(inst.max_cutoff_actions_per_instance_per_sync)}"/>
               </div>
             </div>
+            <div class="settings-grid-auto">
+              ${modeUi}
+            </div>
         `;
-        const modeUi = (inst.app === 'sonarr') ? `
-              <div class="field field-stack-gap">
+        const timingUi = `
+            <div class="settings-grid-auto">
+              <div class="field">
                 <div class="label">
-                  Missing Mode
-                  <span class="info-icon" title="Smart = auto-selects best mode. Season Packs = uses SeasonSearch API. Show Batch = EpisodeSearch for all missing eps in a show. Episode = per-episode search."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                  Hours After Release
+                  <span class="info-icon" title="Minimum hours after a title's release date before Seekarr will search for it."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <select class="cfg si_missing_mode" name="settings_${safe(key)}_missing_mode">
-                  <option value="smart" ${mode === 'smart' ? 'selected' : ''}>Smart</option>
-                  <option value="season_packs" ${mode === 'season_packs' ? 'selected' : ''}>Season Packs</option>
-                  <option value="shows" ${mode === 'shows' ? 'selected' : ''}>Show Batch</option>
-                  <option value="episodes" ${mode === 'episodes' ? 'selected' : ''}>Episode</option>
-                </select>
+                <input class="cfg si_after_release" name="settings_${safe(key)}_after_release" type="number" min="0" value="${safe(inst.min_hours_after_release)}"/>
               </div>
-        ` : '';
+              <div class="field">
+                <div class="label">Retry (hours)</div>
+                <input class="cfg si_retry" name="settings_${safe(key)}_retry_hours" type="number" min="1" value="${safe(inst.item_retry_hours)}"/>
+              </div>
+              <div class="field">
+                <div class="label">
+                  Seconds Between
+                  <span class="info-icon" title="Minimum delay in seconds between consecutive search actions to avoid hammering the indexer."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <input class="cfg si_between" name="settings_${safe(key)}_seconds_between" type="number" min="0" value="${safe(inst.min_seconds_between_actions)}"/>
+              </div>
+              <div class="field">
+                <div class="label">Rate Window (min)</div>
+                <input class="cfg si_rate_window" name="settings_${safe(key)}_rate_window" type="number" min="1" value="${safe(inst.rate_window_minutes)}"/>
+              </div>
+              <div class="field">
+                <div class="label">Rate Cap</div>
+                <input class="cfg si_rate_cap" name="settings_${safe(key)}_rate_cap" type="number" min="1" value="${safe(inst.rate_cap)}"/>
+              </div>
+            </div>
+        `;
         wrap.innerHTML += `
           <div class="card settings-tab-content settings-instance-card" id="settings-tab-${safe(key)}" data-app="${safe(inst.app)}" data-key="${safe(key)}">
             <div class="instance-head settings-instance-head">
@@ -2363,17 +2441,23 @@ def create_app(db_path: str | None = None) -> Flask:
             </div>
 
             <div class="settings-panel">
-              <h4 class="settings-panel-title">Limits & Intervals</h4>
-              ${limitsUi}
+              <h4 class="settings-panel-title">Run Schedule</h4>
+              ${runScheduleUi}
+            </div>
+
+            <div class="settings-panel">
+              <h4 class="settings-panel-title">Sleep Window</h4>
+              ${sleepWindowUi}
             </div>
 
             <div class="settings-panel">
               <h4 class="settings-panel-title">Search Behavior</h4>
               ${behaviorUi}
-              <div class="settings-grid-auto">
-                ${orderUi}
-                ${modeUi}
-              </div>
+            </div>
+
+            <div class="settings-panel">
+              <h4 class="settings-panel-title">Search Timing & Rate Limits</h4>
+              ${timingUi}
             </div>
 
             <div class="settings-panel danger-panel">
@@ -2398,6 +2482,7 @@ def create_app(db_path: str | None = None) -> Flask:
 
 
       }
+      syncSleepWindowControls(wrap);
       window.updateSettingsTabs(window.settingsInstances);
     }
 
@@ -2480,6 +2565,9 @@ def create_app(db_path: str | None = None) -> Flask:
     document.getElementById('section-settings').addEventListener('change', (e) => {
       const target = e.target;
       if (!target || !(target instanceof HTMLElement)) return;
+      if (target.classList.contains('si_quiet_enabled')) {
+        syncSleepWindowControls(target.closest('.settings-instance-card') || document);
+      }
       if (
         target.id === 'settings-date-format' ||
         target.id === 'settings-time-format' ||
@@ -2590,6 +2678,9 @@ def create_app(db_path: str | None = None) -> Flask:
 
                 instance_name = _normalize_instance_name(row.get("instance_name"), app_name, iid)
                 arr_url = _normalize_arr_url(row.get("arr_url"), app_name, iid)
+                quiet_hours_enabled = _normalize_quiet_hours_enabled(row.get("quiet_hours_enabled"))
+                quiet_hours_start = _normalize_hhmm_or_empty(row.get("quiet_hours_start"), "sleep start", app_name, iid)
+                quiet_hours_end = _normalize_hhmm_or_empty(row.get("quiet_hours_end"), "sleep end", app_name, iid)
                 values = {
                     "instance_name": instance_name,
                     "enabled": 1 if bool(row.get("enabled", True)) else 0,
@@ -2598,8 +2689,9 @@ def create_app(db_path: str | None = None) -> Flask:
                     "search_cutoff_unmet": 1 if bool(row.get("search_cutoff_unmet", True)) else 0,
                     "upgrade_scope": _normalize_upgrade_scope(row.get("upgrade_scope") or "wanted"),
                     "search_order": _normalize_search_order(row.get("search_order") or "smart"),
-                    "quiet_hours_start": str(row.get("quiet_hours_start") or "").strip(),
-                    "quiet_hours_end": str(row.get("quiet_hours_end") or "").strip(),
+                    "quiet_hours_enabled": 1 if quiet_hours_enabled else 0,
+                    "quiet_hours_start": quiet_hours_start,
+                    "quiet_hours_end": quiet_hours_end,
                     "min_hours_after_release": max(0, int(row.get("min_hours_after_release") or 0)),
                     "min_seconds_between_actions": max(0, int(row.get("min_seconds_between_actions") or 0)),
                     "max_missing_actions_per_instance_per_sync": max(

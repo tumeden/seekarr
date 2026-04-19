@@ -33,6 +33,7 @@ def _radarr_instance(upgrade_scope: str) -> ArrSyncInstanceConfig:
         search_cutoff_unmet=True,
         upgrade_scope=upgrade_scope,
         search_order="newest",
+        quiet_hours_enabled=None,
         quiet_hours_start=None,
         quiet_hours_end=None,
         min_hours_after_release=None,
@@ -117,3 +118,51 @@ def test_engine_passes_both_upgrade_scope(monkeypatch, tmp_path) -> None:
     engine.run_instance("radarr", 1, force=True)
 
     assert seen == [(True, True)]
+
+
+def test_engine_ignores_sleep_window_when_disabled(monkeypatch, tmp_path) -> None:
+    seen: list[tuple[bool, bool]] = []
+
+    class FakeArrClient:
+        def __init__(self, name, config, timeout_seconds, verify_ssl, logger):  # noqa: ANN001
+            self.name = name
+
+        def fetch_wanted_movies(self, search_missing=True, search_cutoff_unmet=True, search_all_monitored=False):  # noqa: ANN001
+            seen.append((bool(search_cutoff_unmet), bool(search_all_monitored)))
+            return []
+
+    inst = _radarr_instance("wanted")
+    inst = ArrSyncInstanceConfig(
+        **{
+            **inst.__dict__,
+            "quiet_hours_enabled": False,
+            "quiet_hours_start": "23:00",
+            "quiet_hours_end": "06:00",
+        }
+    )
+    cfg = RuntimeConfig(
+        app=AppConfig(
+            db_path=str(tmp_path / "seekarr.db"),
+            item_retry_hours=12,
+            min_hours_after_release=0,
+            quiet_hours_start="23:00",
+            quiet_hours_end="06:00",
+            quiet_hours_timezone="UTC",
+            max_missing_actions_per_instance_per_sync=0,
+            max_cutoff_actions_per_instance_per_sync=1,
+            min_seconds_between_actions=0,
+            rate_window_minutes=60,
+            rate_cap_per_instance=10,
+            request_timeout_seconds=5,
+            verify_ssl=True,
+            log_level="INFO",
+        ),
+        radarr_instances=[inst],
+        sonarr_instances=[],
+    )
+    monkeypatch.setattr("seekarr.engine.ArrClient", FakeArrClient)
+
+    engine = Engine(config=cfg, logger=logging.getLogger("test"))
+    engine.run_instance("radarr", 1, force=False)
+
+    assert seen == [(True, False)]

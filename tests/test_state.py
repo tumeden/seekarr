@@ -28,6 +28,7 @@ def test_ui_instance_settings_roundtrip_upgrade_scope(tmp_path) -> None:
             "search_cutoff_unmet": 1,
             "upgrade_scope": "both",
             "search_order": "smart",
+            "quiet_hours_enabled": 0,
             "quiet_hours_start": "23:00",
             "quiet_hours_end": "06:00",
             "min_hours_after_release": 8,
@@ -45,6 +46,7 @@ def test_ui_instance_settings_roundtrip_upgrade_scope(tmp_path) -> None:
     values = store.get_all_ui_instance_settings()[("radarr", 1)]
     assert values["instance_name"] == "Radarr Main"
     assert values["upgrade_scope"] == "both"
+    assert values["quiet_hours_enabled"] == 0
 
 
 def test_ui_instance_settings_migrates_upgrade_scope_column(tmp_path) -> None:
@@ -60,6 +62,7 @@ def test_ui_instance_settings_migrates_upgrade_scope_column(tmp_path) -> None:
                 search_missing INTEGER,
                 search_cutoff_unmet INTEGER,
                 search_order TEXT,
+                quiet_hours_enabled INTEGER,
                 quiet_hours_start TEXT,
                 quiet_hours_end TEXT,
                 min_hours_after_release INTEGER,
@@ -82,6 +85,7 @@ def test_ui_instance_settings_migrates_upgrade_scope_column(tmp_path) -> None:
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(ui_instance_settings)")}
     assert "instance_name" in cols
     assert "upgrade_scope" in cols
+    assert "quiet_hours_enabled" in cols
 
 
 def test_delete_instance_removes_instance_state_and_credentials(tmp_path) -> None:
@@ -97,6 +101,7 @@ def test_delete_instance_removes_instance_state_and_credentials(tmp_path) -> Non
             "search_cutoff_unmet": 1,
             "upgrade_scope": "wanted",
             "search_order": "smart",
+            "quiet_hours_enabled": 1,
             "quiet_hours_start": "23:00",
             "quiet_hours_end": "06:00",
             "min_hours_after_release": 8,

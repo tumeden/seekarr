@@ -15,6 +15,7 @@
   <img alt="Commits Per Month" src="https://img.shields.io/github/commit-activity/m/tumeden/seekarr?style=flat&logo=github&logoColor=white&label=Commits%2FMonth">
   <img alt="Stars" src="https://img.shields.io/github/stars/tumeden/seekarr?style=flat&logo=github&logoColor=white&label=Stars">
   <a href="https://hub.docker.com/r/tumeden/seekarr"><img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/tumeden/seekarr?style=flat&logo=docker&logoColor=white&label=Docker%20Pulls"></a>
+  <a href="https://github.com/tumeden/seekarr/pkgs/container/seekarr"><img alt="GHCR" src="https://img.shields.io/badge/GHCR-ghcr.io-blue?style=flat&logo=github"></a>
   <a href="https://ko-fi.com/tumeden"><img alt="Donate" src="https://img.shields.io/badge/Donate-Ko--fi-ff5e5b?style=flat&logo=ko-fi&logoColor=white"></a>
   <img alt="License" src="https://img.shields.io/github/license/tumeden/seekarr?style=flat&label=License">
 </p>

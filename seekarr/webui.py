@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit, urlunsplit
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -79,6 +80,47 @@ def _normalize_time_format(value: Any) -> str:
     if fmt in ("12h", "12", "12hr", "12-hour"):
         return "12h"
     return "24h"
+
+
+def _contains_control_chars(value: str) -> bool:
+    return any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
+
+
+_INSTANCE_NAME_RE = re.compile(r"^[A-Za-z0-9._ -]+$")
+
+
+def _normalize_instance_name(value: Any, app_type: str, instance_id: int) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if not text:
+        return _default_instance_name(app_type, instance_id)
+    if _contains_control_chars(text):
+        raise ValueError(f"{app_type.title()} instance #{instance_id} name contains invalid characters")
+    if not _INSTANCE_NAME_RE.fullmatch(text):
+        raise ValueError(
+            f"{app_type.title()} instance #{instance_id} name may only use letters, numbers, spaces, dots, dashes, and underscores"
+        )
+    if len(text) > 120:
+        raise ValueError(f"{app_type.title()} instance #{instance_id} name is too long")
+    return text
+
+
+def _normalize_arr_url(value: Any, app_type: str, instance_id: int) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if _contains_control_chars(raw) or any(ch.isspace() for ch in raw):
+        raise ValueError(f"{app_type.title()} instance #{instance_id} URL contains invalid characters")
+    parts = urlsplit(raw)
+    if parts.scheme.lower() not in ("http", "https"):
+        raise ValueError(f"{app_type.title()} instance #{instance_id} URL must start with http:// or https://")
+    if not parts.netloc:
+        raise ValueError(f"{app_type.title()} instance #{instance_id} URL must include a hostname")
+    if parts.username or parts.password:
+        raise ValueError(f"{app_type.title()} instance #{instance_id} URL must not include embedded credentials")
+    if parts.query or parts.fragment:
+        raise ValueError(f"{app_type.title()} instance #{instance_id} URL must not include query strings or fragments")
+    normalized_path = parts.path.rstrip("/")
+    return urlunsplit((parts.scheme.lower(), parts.netloc, normalized_path, "", ""))
 
 
 def _config_view(config: RuntimeConfig, store: StateStore) -> dict[str, Any]:
@@ -1048,6 +1090,7 @@ def create_app(db_path: str | None = None) -> Flask:
     let activeClockFormat = '24h';
     let refreshTimer = null;
     let countdownTimer = null;
+    let statusData = null;
     let settingsBaseline = '';
     let settingsDirty = false;
     let settingsStatusMessage = '';
@@ -1307,7 +1350,15 @@ def create_app(db_path: str | None = None) -> Flask:
         ? `<span class="badge ok"${t}>${label}</span>`
         : `<span class="badge off"${t}>${label}</span>`;
     }
-    function safe(v) { return (v === null || v === undefined) ? '' : String(v); }
+    function safe(v) {
+      const text = (v === null || v === undefined) ? '' : String(v);
+      return text
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
     function showToast(title, text, tone='success') {
       const stack = document.getElementById('toast-stack');
       if (!stack) return;
@@ -1359,8 +1410,9 @@ def create_app(db_path: str | None = None) -> Flask:
       if (sourceLabel) chips.push(`<span class="recent-action-source">${safe(sourceLabel)}</span>`);
       return chips.join('');
     }
-    async function hydrateActionMediaRows() {
-      const rows = Array.from(document.querySelectorAll(
+    async function hydrateActionMediaRows(root = document) {
+      const scope = root || document;
+      const rows = Array.from(scope.querySelectorAll(
         '.recent-action-row[data-app][data-instance-id][data-item-key], .history-entry[data-app][data-instance-id][data-item-key]'
       ));
       await Promise.all(rows.map(async (row) => {
@@ -1385,7 +1437,7 @@ def create_app(db_path: str | None = None) -> Flask:
             wrap.innerHTML = '';
           }
         } catch (e) {
-          const wrap = row.querySelector('.recent-action-cover-wrap');
+          const wrap = row.querySelector('.recent-action-cover-wrap, .history-entry-cover-wrap');
           row.classList.add('no-cover');
           if (wrap) {
             wrap.classList.add('is-empty');
@@ -1704,6 +1756,111 @@ def create_app(db_path: str | None = None) -> Flask:
       await refresh();
     }
 
+    function renderHistorySection(data, instances) {
+      const runsWrap = document.getElementById('runs-wrap');
+      const sh = data.search_history || {};
+      if (!window.historyActiveTab && instances.length > 0) {
+        window.historyActiveTab = `${instances[0].app}:${instances[0].instance_id}`;
+      }
+      if (!window.historyPage) window.historyPage = {};
+
+      const PAGE_SIZE = 10;
+
+      let tabsHtml = '<div class="history-tabs">';
+      instances.forEach(inst => {
+        const key = `${inst.app}:${inst.instance_id}`;
+        const isActive = (window.historyActiveTab === key);
+        tabsHtml += `<button class="tab-btn history-tab ${isActive ? 'active' : ''}" onclick='window.setHistoryTab(${JSON.stringify(key)}); return false;' type="button">${safe(inst.app).toUpperCase()} - ${safe(inst.instance_name)}</button>`;
+      });
+      tabsHtml += '</div>';
+
+      let contentHtml = '';
+      const activeInst = instances.find(inst => `${inst.app}:${inst.instance_id}` === window.historyActiveTab);
+      if (activeInst) {
+        const key = window.historyActiveTab;
+        const rows = sh[key] || [];
+        const totalRows = rows.length;
+        const totalPages = Math.ceil(totalRows / PAGE_SIZE) || 1;
+        let currentPage = window.historyPage[key] || 1;
+        if (currentPage > totalPages) currentPage = totalPages;
+        window.historyPage[key] = currentPage;
+
+        const startIdx = (currentPage - 1) * PAGE_SIZE;
+        const pageRows = rows.slice(startIdx, startIdx + PAGE_SIZE);
+
+        let body = '';
+        for (const row of pageRows) {
+          const appType = String(row.app_type || activeInst.app || '').trim().toLowerCase();
+          const instanceId = Number(row.instance_id || activeInst.instance_id || 0);
+          const kindMeta = actionKindMeta(row.action_kind, row.item_key);
+          const itemOpenArgs = `${JSON.stringify(appType)}, ${JSON.stringify(String(instanceId))}, ${JSON.stringify(String(row.item_key || ''))}`;
+          const rowClass = row.item_key ? 'history-entry' : 'history-entry no-cover';
+          const dateLabel = fmtTime(row.occurred_at, { includeTime: false }) || '-';
+          const timeLabel = fmtTime(row.occurred_at, { includeSeconds: false, omitDate: true }) || '';
+          body += `
+            <article class="history-list-item">
+              <div class="history-entry-stamp mono" title="${safe(fmtTime(row.occurred_at) || '')}">
+                <div class="history-time-date">${safe(dateLabel)}</div>
+                <div class="history-time-clock">${safe(timeLabel)}</div>
+              </div>
+              <div class="${rowClass}" data-app="${safe(appType)}" data-instance-id="${safe(String(instanceId))}" data-item-key="${safe(String(row.item_key || ''))}">
+                <div class="history-entry-cover-wrap${row.item_key ? '' : ' is-empty'}"></div>
+                <div class="history-entry-main">
+                  <button class="history-entry-title history-entry-link" type="button" onclick='openRecentActionItem(${itemOpenArgs}); return false;'>${safe(row.title || 'Untitled search')}</button>
+                  <div class="history-entry-meta">${renderActionMetaBadges(kindMeta)}</div>
+                </div>
+              </div>
+            </article>`;
+        }
+        if (!body) {
+          body = `<div class="mono history-empty">No searches recorded yet.</div>`;
+        }
+
+        let paginationHtml = '';
+        if (totalPages > 1) {
+          paginationHtml = `<div class="history-pagination">
+            <div class="history-pagination-info">Showing ${startIdx + 1} to ${Math.min(startIdx + PAGE_SIZE, totalRows)} of ${totalRows} entries</div>
+            <div class="history-pagination-controls">
+              <button class="btn-mini btn-mini-neutral" ${currentPage === 1 ? 'disabled' : ''} onclick='window.changeHistoryPage(${JSON.stringify(key)}, -1); return false;' type="button">Previous</button>
+              <div class="page-status">Page ${currentPage} of ${totalPages}</div>
+              <button class="btn-mini btn-mini-neutral" ${currentPage === totalPages ? 'disabled' : ''} onclick='window.changeHistoryPage(${JSON.stringify(key)}, 1); return false;' type="button">Next</button>
+            </div>
+          </div>`;
+        }
+
+        contentHtml = `
+          <div class="card history-card">
+            <div class="history-list-wrap">
+              <div class="history-list-note">Times shown in ${safe(getTimeZoneLabel())}</div>
+              <div class="history-list">${body}</div>
+            </div>
+            ${paginationHtml}
+          </div>`;
+      }
+
+      runsWrap.innerHTML = tabsHtml + contentHtml;
+      hydrateActionMediaRows(runsWrap);
+    }
+
+    window.setHistoryTab = function setHistoryTab(key) {
+      if (!window.historyPage) window.historyPage = {};
+      window.historyActiveTab = key;
+      window.historyPage[key] = 1;
+      if (!statusData) return;
+      const instances = Array.isArray(statusData.config?.instances) ? statusData.config.instances : [];
+      renderHistorySection(statusData, instances);
+    };
+
+    window.changeHistoryPage = function changeHistoryPage(key, delta) {
+      if (!window.historyPage) window.historyPage = {};
+      window.historyActiveTab = key;
+      const current = Number(window.historyPage[key] || 1);
+      window.historyPage[key] = Math.max(1, current + Number(delta || 0));
+      if (!statusData) return;
+      const instances = Array.isArray(statusData.config?.instances) ? statusData.config.instances : [];
+      renderHistorySection(statusData, instances);
+    };
+
     async function refresh() {
       const r = await apiFetch('/api/status');
       if (r.status === 401) {
@@ -1711,6 +1868,7 @@ def create_app(db_path: str | None = None) -> Flask:
         return;
       }
       const data = await r.json();
+      statusData = data;
       activeTimeZone = String(data?.config?.app?.quiet_hours_timezone || '').trim();
       activeDateFormat = normalizeDateFormat(data?.config?.app?.date_format);
       activeClockFormat = normalizeTimeFormat(data?.config?.app?.time_format);
@@ -1859,88 +2017,7 @@ def create_app(db_path: str | None = None) -> Flask:
         `;
       }
 
-      // Search History: Tabs + Pagination
-      const runsWrap = document.getElementById('runs-wrap');
-      const sh = data.search_history || {};
-      if (!window.historyActiveTab && instances.length > 0) {
-        window.historyActiveTab = `${instances[0].app}:${instances[0].instance_id}`;
-      }
-      if (!window.historyPage) window.historyPage = {};
-      
-      const PAGE_SIZE = 10;
-      
-      let tabsHtml = '<div class="history-tabs">';
-      instances.forEach(inst => {
-        const key = `${inst.app}:${inst.instance_id}`;
-        const isActive = (window.historyActiveTab === key);
-        tabsHtml += `<button class="tab-btn history-tab ${isActive ? 'active' : ''}" onclick="window.historyActiveTab='${key}'; window.historyPage['${key}']=1; refresh(); return false;">${safe(inst.app).toUpperCase()} - ${safe(inst.instance_name)}</button>`;
-      });
-      tabsHtml += '</div>';
-
-      let contentHtml = '';
-      const activeInst = instances.find(inst => `${inst.app}:${inst.instance_id}` === window.historyActiveTab);
-      if (activeInst) {
-        const key = window.historyActiveTab;
-        const rows = sh[key] || [];
-        const totalRows = rows.length;
-        const totalPages = Math.ceil(totalRows / PAGE_SIZE) || 1;
-        let currentPage = window.historyPage[key] || 1;
-        if (currentPage > totalPages) currentPage = totalPages;
-        
-        const startIdx = (currentPage - 1) * PAGE_SIZE;
-        const pageRows = rows.slice(startIdx, startIdx + PAGE_SIZE);
-        
-        let body = '';
-        for (const row of pageRows) {
-          const appType = String(row.app_type || activeInst.app || '').trim().toLowerCase();
-          const instanceId = Number(row.instance_id || activeInst.instance_id || 0);
-          const kindMeta = actionKindMeta(row.action_kind, row.item_key);
-          const itemOpenArgs = `${JSON.stringify(appType)}, ${JSON.stringify(String(instanceId))}, ${JSON.stringify(String(row.item_key || ''))}`;
-          const rowClass = row.item_key ? 'history-entry' : 'history-entry no-cover';
-          const dateLabel = fmtTime(row.occurred_at, { includeTime: false }) || '-';
-          const timeLabel = fmtTime(row.occurred_at, { includeSeconds: false, omitDate: true }) || '';
-          body += `
-            <article class="history-list-item">
-              <div class="history-entry-stamp mono" title="${safe(fmtTime(row.occurred_at) || '')}">
-                <div class="history-time-date">${safe(dateLabel)}</div>
-                <div class="history-time-clock">${safe(timeLabel)}</div>
-              </div>
-              <div class="${rowClass}" data-app="${safe(appType)}" data-instance-id="${safe(String(instanceId))}" data-item-key="${safe(String(row.item_key || ''))}">
-                <div class="history-entry-cover-wrap${row.item_key ? '' : ' is-empty'}"></div>
-                <div class="history-entry-main">
-                  <button class="history-entry-title history-entry-link" type="button" onclick='openRecentActionItem(${itemOpenArgs}); return false;'>${safe(row.title || 'Untitled search')}</button>
-                  <div class="history-entry-meta">${renderActionMetaBadges(kindMeta)}</div>
-                </div>
-              </div>
-            </article>`;
-        }
-        if (!body) {
-          body = `<div class="mono history-empty">No searches recorded yet.</div>`;
-        }
-
-        // Pagination controls
-        let paginationHtml = '';
-        if (totalPages > 1) {
-          paginationHtml = `<div class="history-pagination">
-            <div class="history-pagination-info">Showing ${startIdx + 1} to ${Math.min(startIdx + PAGE_SIZE, totalRows)} of ${totalRows} entries</div>
-            <div class="history-pagination-controls">
-              <button class="btn-mini btn-mini-neutral" ${currentPage === 1 ? 'disabled' : ''} onclick="window.historyPage['${key}']=${currentPage-1}; refresh(); return false;">Previous</button>
-              <div class="page-status">Page ${currentPage} of ${totalPages}</div>
-              <button class="btn-mini btn-mini-neutral" ${currentPage === totalPages ? 'disabled' : ''} onclick="window.historyPage['${key}']=${currentPage+1}; refresh(); return false;">Next</button>
-            </div>
-          </div>`;
-        }
-
-        contentHtml = `
-          <div class="card history-card">
-            <div class="history-list-wrap">
-              <div class="history-list-note">Times shown in ${safe(getTimeZoneLabel())}</div>
-              <div class="history-list">${body}</div>
-            </div>
-            ${paginationHtml}
-          </div>`;
-      }
-      runsWrap.innerHTML = tabsHtml + contentHtml;
+      renderHistorySection(data, instances);
 
       const actionsEl = document.getElementById('recent-actions');
       const instanceNameMap = new Map(
@@ -1980,7 +2057,7 @@ def create_app(db_path: str | None = None) -> Flask:
           `;
         }).join('');
       }
-      hydrateActionMediaRows();
+      hydrateActionMediaRows(actionsEl);
       tickCountdowns();
     }
     document.getElementById('instance-cards').addEventListener('click', (e) => {
@@ -2511,9 +2588,10 @@ def create_app(db_path: str | None = None) -> Flask:
                     continue
                 seen_keys.add(key)
 
+                instance_name = _normalize_instance_name(row.get("instance_name"), app_name, iid)
+                arr_url = _normalize_arr_url(row.get("arr_url"), app_name, iid)
                 values = {
-                    "instance_name": str(row.get("instance_name") or _default_instance_name(app_name, iid)).strip()
-                    or _default_instance_name(app_name, iid),
+                    "instance_name": instance_name,
                     "enabled": 1 if bool(row.get("enabled", True)) else 0,
                     "interval_minutes": max(15, min(60, int(row.get("interval_minutes") or 15))),
                     "search_missing": 1 if bool(row.get("search_missing", True)) else 0,
@@ -2534,7 +2612,7 @@ def create_app(db_path: str | None = None) -> Flask:
                     "item_retry_hours": max(1, int(row.get("item_retry_hours") or 1)),
                     "rate_window_minutes": max(1, int(row.get("rate_window_minutes") or 1)),
                     "rate_cap": max(1, int(row.get("rate_cap") or 1)),
-                    "arr_url": str(row.get("arr_url") or "").strip(),
+                    "arr_url": arr_url,
                 }
                 store.upsert_ui_instance_settings(app_name, iid, values)
 

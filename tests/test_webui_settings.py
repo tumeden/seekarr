@@ -155,3 +155,174 @@ def test_delete_instance_endpoint_removes_instance_and_credentials(tmp_path: Pat
     refreshed = client.get("/api/settings", headers=headers)
     assert refreshed.status_code == 200
     assert refreshed.get_json()["instances"] == []
+
+
+def test_settings_reject_invalid_arr_url(tmp_path: Path) -> None:
+    db_path = tmp_path / "seekarr.db"
+
+    app = create_app(str(db_path))
+    client = app.test_client()
+    headers = _bootstrap_password(client)
+
+    saved = client.post(
+        "/api/settings",
+        headers=headers,
+        json={
+            "app": {},
+            "instances": [
+                {
+                    "app": "radarr",
+                    "instance_id": 1,
+                    "instance_name": "Radarr Main",
+                    "enabled": True,
+                    "interval_minutes": 15,
+                    "search_missing": True,
+                    "search_cutoff_unmet": True,
+                    "upgrade_scope": "wanted",
+                    "search_order": "smart",
+                    "quiet_hours_start": "23:00",
+                    "quiet_hours_end": "06:00",
+                    "min_hours_after_release": 8,
+                    "min_seconds_between_actions": 2,
+                    "max_missing_actions_per_instance_per_sync": 5,
+                    "max_cutoff_actions_per_instance_per_sync": 1,
+                    "item_retry_hours": 72,
+                    "rate_window_minutes": 60,
+                    "rate_cap": 25,
+                    "arr_url": "<script>alert(1)</script>",
+                    "arr_api_key": "abc123",
+                }
+            ],
+        },
+    )
+    assert saved.status_code == 400
+    assert "URL" in saved.get_json()["error"]
+
+    refreshed = client.get("/api/settings", headers=headers)
+    assert refreshed.status_code == 200
+    assert refreshed.get_json()["instances"] == []
+
+
+def test_settings_normalize_arr_url_and_reject_htmlish_instance_name(tmp_path: Path) -> None:
+    db_path = tmp_path / "seekarr.db"
+
+    app = create_app(str(db_path))
+    client = app.test_client()
+    headers = _bootstrap_password(client)
+
+    bad_name = client.post(
+        "/api/settings",
+        headers=headers,
+        json={
+            "app": {},
+            "instances": [
+                {
+                    "app": "sonarr",
+                    "instance_id": 1,
+                    "instance_name": "<b>Sonarr Main</b>",
+                    "enabled": True,
+                    "interval_minutes": 15,
+                    "search_missing": True,
+                    "search_cutoff_unmet": True,
+                    "upgrade_scope": "wanted",
+                    "search_order": "smart",
+                    "quiet_hours_start": "23:00",
+                    "quiet_hours_end": "06:00",
+                    "min_hours_after_release": 8,
+                    "min_seconds_between_actions": 2,
+                    "max_missing_actions_per_instance_per_sync": 5,
+                    "max_cutoff_actions_per_instance_per_sync": 1,
+                    "sonarr_missing_mode": "smart",
+                    "item_retry_hours": 72,
+                    "rate_window_minutes": 60,
+                    "rate_cap": 25,
+                    "arr_url": "HTTP://sonarr-main:8989/",
+                    "arr_api_key": "abc123",
+                }
+            ],
+        },
+    )
+    assert bad_name.status_code == 400
+    assert "letters, numbers, spaces, dots, dashes, and underscores" in bad_name.get_json()["error"]
+
+    saved = client.post(
+        "/api/settings",
+        headers=headers,
+        json={
+            "app": {},
+            "instances": [
+                {
+                    "app": "sonarr",
+                    "instance_id": 1,
+                    "instance_name": "  Sonarr   Main  ",
+                    "enabled": True,
+                    "interval_minutes": 15,
+                    "search_missing": True,
+                    "search_cutoff_unmet": True,
+                    "upgrade_scope": "wanted",
+                    "search_order": "smart",
+                    "quiet_hours_start": "23:00",
+                    "quiet_hours_end": "06:00",
+                    "min_hours_after_release": 8,
+                    "min_seconds_between_actions": 2,
+                    "max_missing_actions_per_instance_per_sync": 5,
+                    "max_cutoff_actions_per_instance_per_sync": 1,
+                    "sonarr_missing_mode": "smart",
+                    "item_retry_hours": 72,
+                    "rate_window_minutes": 60,
+                    "rate_cap": 25,
+                    "arr_url": "HTTP://sonarr-main:8989/",
+                    "arr_api_key": "abc123",
+                }
+            ],
+        },
+    )
+    assert saved.status_code == 200
+
+    refreshed = client.get("/api/settings", headers=headers)
+    assert refreshed.status_code == 200
+    instance = refreshed.get_json()["instances"][0]
+    assert instance["instance_name"] == "Sonarr Main"
+    assert instance["arr_url"] == "http://sonarr-main:8989"
+
+
+def test_settings_reject_weird_instance_name_characters(tmp_path: Path) -> None:
+    db_path = tmp_path / "seekarr.db"
+
+    app = create_app(str(db_path))
+    client = app.test_client()
+    headers = _bootstrap_password(client)
+
+    saved = client.post(
+        "/api/settings",
+        headers=headers,
+        json={
+            "app": {},
+            "instances": [
+                {
+                    "app": "radarr",
+                    "instance_id": 1,
+                    "instance_name": "Radarr Main!!!",
+                    "enabled": True,
+                    "interval_minutes": 15,
+                    "search_missing": True,
+                    "search_cutoff_unmet": True,
+                    "upgrade_scope": "wanted",
+                    "search_order": "smart",
+                    "quiet_hours_start": "23:00",
+                    "quiet_hours_end": "06:00",
+                    "min_hours_after_release": 8,
+                    "min_seconds_between_actions": 2,
+                    "max_missing_actions_per_instance_per_sync": 5,
+                    "max_cutoff_actions_per_instance_per_sync": 1,
+                    "item_retry_hours": 72,
+                    "rate_window_minutes": 60,
+                    "rate_cap": 25,
+                    "arr_url": "http://radarr-main:7878",
+                    "arr_api_key": "abc123",
+                }
+            ],
+        },
+    )
+    assert saved.status_code == 400
+    assert "letters, numbers, spaces, dots, dashes, and underscores" in saved.get_json()["error"]

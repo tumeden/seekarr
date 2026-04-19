@@ -11,11 +11,11 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import urlsplit, urlunsplit
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 from flask import Flask, jsonify, request, send_file
@@ -168,7 +168,7 @@ def _config_view(config: RuntimeConfig, store: StateStore) -> dict[str, Any]:
             "upgrade_scope": str(getattr(inst, "upgrade_scope", "wanted") or "wanted"),
             "search_order": str(getattr(inst, "search_order", "smart") or "smart"),
             "quiet_hours_enabled": bool(
-                True if getattr(inst, "quiet_hours_enabled", None) is None else getattr(inst, "quiet_hours_enabled")
+                True if getattr(inst, "quiet_hours_enabled", None) is None else inst.quiet_hours_enabled
             ),
             "quiet_hours_start": str(getattr(inst, "quiet_hours_start", None) or config.app.quiet_hours_start or ""),
             "quiet_hours_end": str(getattr(inst, "quiet_hours_end", None) or config.app.quiet_hours_end or ""),

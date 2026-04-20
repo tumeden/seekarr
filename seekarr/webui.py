@@ -376,7 +376,6 @@ def create_app(db_path: str | None = None) -> Flask:
         "last_title": None,
         "recent_actions": [],
         "error": None,
-
         "active_app_type": None,
         "active_instance_id": None,
         "active_instance_name": None,
@@ -835,7 +834,6 @@ def create_app(db_path: str | None = None) -> Flask:
                     time.sleep(1.0)
                     continue
                 try:
-
                     engine.run_instance(
                         app_type=app_type, instance_id=instance_id, force=False, progress_cb=_progress_cb
                     )
@@ -971,6 +969,11 @@ def create_app(db_path: str | None = None) -> Flask:
           Donate a coffee
         </a>
       </div>
+      <div class="sidebar-version">
+        <span id="version-chip">Version --</span>
+        <a id="update-chip" href="https://github.com/tumeden/seekarr/releases/latest"
+           target="_blank" rel="noopener noreferrer" style="display:none;">Update available</a>
+      </div>
     </aside>
     <main class="main">
       <header class="topbar">
@@ -982,10 +985,6 @@ def create_app(db_path: str | None = None) -> Flask:
         </div>
         <div class="topbar-actions">
           <span class="topbar-message" id="msg"></span>
-
-          <span class="topbar-badge" id="version-chip">Version --</span>
-          <a class="topbar-badge update" id="update-chip" href="https://github.com/tumeden/seekarr/releases/latest"
-             target="_blank" rel="noopener noreferrer" style="display:none;">Update available</a>
         </div>
       </header>
       <div class="content-canvas">
@@ -1912,7 +1911,7 @@ def create_app(db_path: str | None = None) -> Flask:
       const updateChip = document.getElementById('update-chip');
       if (updateChip) {
         if (ver.update_available) {
-          updateChip.style.display = 'inline-block';
+          updateChip.style.display = 'inline';
           updateChip.href = String(ver.release_url || 'https://github.com/tumeden/seekarr/releases/latest');
           updateChip.title = ver.latest ? `Latest: ${ver.latest}` : 'Update available';
         } else {
@@ -2734,8 +2733,6 @@ def create_app(db_path: str | None = None) -> Flask:
 
         threading.Thread(target=runner, name="webui-run-instance", daemon=True).start()
         return jsonify({"message": f"Instance run started: {app_type}:{instance_id}", "force": force}), 202
-
-
 
     @app.get("/api/item_meta")
     def recent_action_item_meta() -> Any:

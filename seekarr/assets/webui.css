@@ -177,6 +177,32 @@ body.auth-locked .settings-save-fab {
   background: rgba(255, 94, 91, 0.16);
 }
 
+.sidebar-version {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  opacity: 0.6;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.sidebar-version a {
+  color: rgba(253, 230, 138, 0.95);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 10px;
+  transition: var(--transition);
+}
+
+.sidebar-version a:hover {
+  color: #fde68a;
+  opacity: 1;
+}
+
 .main {
   min-width: 0;
   display: flex;
@@ -1713,35 +1739,6 @@ body {
   display: none;
 }
 
-.topbar-badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  text-decoration: none;
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.03em;
-  padding: 7px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(20, 27, 39, 0.42);
-}
-
-.topbar-badge:hover {
-  border-color: rgba(249, 115, 22, 0.35);
-  color: #fff;
-}
-
-.topbar-badge.update {
-  border-color: rgba(245, 158, 11, 0.35);
-  background: rgba(245, 158, 11, 0.14);
-  color: rgba(253, 230, 138, 0.98);
-}
-
-.topbar-badge.update:hover {
-  border-color: rgba(245, 158, 11, 0.55);
-}
 
 .content-canvas {
   padding: 18px 18px 24px;
@@ -2752,11 +2749,6 @@ body {
     align-items: flex-start;
   }
 
-  .topbar-badge,
-  .topbar .chip {
-    width: auto;
-    justify-content: center;
-  }
 
   .topbar-message {
     width: 100%;

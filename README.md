@@ -46,7 +46,17 @@ Upgrade source modes:
 
 ---
 
+
 ## Docker Quick Start
+
+### Docker Images
+
+The image is available on both Docker Hub and GitHub Container Registry:
+
+- **Docker Hub**: `tumeden/seekarr:latest`
+- **GHCR**: `ghcr.io/tumeden/seekarr:latest`
+
+### Docker Compose
 
 ```yaml
 services:
@@ -71,6 +81,15 @@ Then:
 4. Configure Radarr/Sonarr instances and settings in **Settings**. You can add or remove multiple instances for either app from the UI.
 
 By default the container stores data in `/data/seekarr.db`.
+
+### Updating
+
+To update Seekarr to the latest version:
+
+```bash
+docker compose pull
+docker compose up -d
+```
 
 ---
 

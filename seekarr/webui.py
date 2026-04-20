@@ -376,9 +376,7 @@ def create_app(db_path: str | None = None) -> Flask:
         "last_title": None,
         "recent_actions": [],
         "error": None,
-        "autorun_enabled": True,
-        "autorun_last_check": None,
-        "autorun_last_run_started": None,
+
         "active_app_type": None,
         "active_instance_id": None,
         "active_instance_name": None,
@@ -796,12 +794,6 @@ def create_app(db_path: str | None = None) -> Flask:
         while True:
             try:
                 store.set_scheduler_heartbeat()
-                with run_state_lock:
-                    enabled = bool(run_state.get("autorun_enabled", True))
-                    run_state["autorun_last_check"] = datetime.now(timezone.utc).isoformat()
-                if not enabled:
-                    time.sleep(1.0)
-                    continue
 
                 inst = engine._find_instance(app_type, instance_id)
                 if not inst or not inst.enabled or not inst.arr.enabled:
@@ -843,8 +835,7 @@ def create_app(db_path: str | None = None) -> Flask:
                     time.sleep(1.0)
                     continue
                 try:
-                    with run_state_lock:
-                        run_state["autorun_last_run_started"] = datetime.now(timezone.utc).isoformat()
+
                     engine.run_instance(
                         app_type=app_type, instance_id=instance_id, force=False, progress_cb=_progress_cb
                     )
@@ -991,12 +982,7 @@ def create_app(db_path: str | None = None) -> Flask:
         </div>
         <div class="topbar-actions">
           <span class="topbar-message" id="msg"></span>
-          <div class="actions dashboard-actions">
-            <label class="chip toggle-chip">
-              <input id="autorun-toggle" name="seekarr_autorun_toggle" type="checkbox" checked />
-              Auto-run
-            </label>
-          </div>
+
           <span class="topbar-badge" id="version-chip">Version --</span>
           <a class="topbar-badge update" id="update-chip" href="https://github.com/tumeden/seekarr/releases/latest"
              target="_blank" rel="noopener noreferrer" style="display:none;">Update available</a>
@@ -1750,15 +1736,7 @@ def create_app(db_path: str | None = None) -> Flask:
       });
     }
 
-    async function setAutorun(enabled) {
-      try {
-        await apiFetch('/api/autorun', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ enabled }),
-        });
-      } catch (e) {}
-    }
+
 
     async function forceRunInstance(app, instanceId) {
       const msg = document.getElementById('msg');
@@ -1943,10 +1921,7 @@ def create_app(db_path: str | None = None) -> Flask:
       }
       
       const rs = data.run_state || {};
-      const autorunToggle = document.getElementById('autorun-toggle');
-      if (autorunToggle && autorunToggle.checked !== !!rs.autorun_enabled) {
-        autorunToggle.checked = !!rs.autorun_enabled;
-      }
+
       const hb = data.scheduler_heartbeat || null;
       const hbMs = hb ? Date.parse(hb) : NaN;
       const alive = Number.isFinite(hbMs) && (Date.now() - hbMs) < 120000;
@@ -1997,7 +1972,7 @@ def create_app(db_path: str | None = None) -> Flask:
         let note = 'Scheduled';
         if (due) {
           if (!alive) note = 'Due, but scheduler is OFF';
-          else if (!rs.autorun_enabled) note = 'Due, but auto-run is off';
+
           else note = 'Due, will run on the next scheduler tick';
         }
         const pct = cap > 0 ? Math.min(100, Math.round((used / cap) * 100)) : 0;
@@ -2123,7 +2098,7 @@ def create_app(db_path: str | None = None) -> Flask:
       if (!app || !id) return;
       forceRunInstance(app, id);
     });
-    document.getElementById('autorun-toggle').addEventListener('change', (e) => setAutorun(!!e.target.checked));
+
     document.getElementById('auth-submit').addEventListener('click', authSubmit);
     document.getElementById('auth-password').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') authSubmit();
@@ -2760,13 +2735,7 @@ def create_app(db_path: str | None = None) -> Flask:
         threading.Thread(target=runner, name="webui-run-instance", daemon=True).start()
         return jsonify({"message": f"Instance run started: {app_type}:{instance_id}", "force": force}), 202
 
-    @app.post("/api/autorun")
-    def set_autorun() -> Any:
-        payload = request.get_json(silent=True) or {}
-        enabled = bool(payload.get("enabled", True))
-        with run_state_lock:
-            run_state["autorun_enabled"] = enabled
-        return jsonify({"autorun_enabled": enabled})
+
 
     @app.get("/api/item_meta")
     def recent_action_item_meta() -> Any:

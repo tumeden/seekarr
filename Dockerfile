@@ -11,7 +11,6 @@ WORKDIR /app
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gosu \
-    shadow \
     && rm -rf /var/lib/apt/lists/*
 
 RUN echo "${SEEKARR_VERSION}" > version.txt

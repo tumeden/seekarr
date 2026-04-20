@@ -76,7 +76,7 @@ services:
 Then:
 
 1. Start container.
-2. Open `http://localhost:8788`.
+2. Open `http://localhost:8788`
 3. Set Web UI password.
 4. Configure Radarr/Sonarr instances and settings in **Settings**. You can add or remove multiple instances for either app from the UI.
 

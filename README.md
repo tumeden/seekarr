@@ -56,6 +56,9 @@ services:
     restart: unless-stopped
     ports:
       - "8788:8788"
+    # environment:
+    #   - PUID=1000
+    #   - PGID=1000
     volumes:
       - ./data:/data
 ```

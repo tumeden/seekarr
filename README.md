@@ -20,43 +20,102 @@
   <img alt="License" src="https://img.shields.io/github/license/tumeden/seekarr?style=flat&label=License">
 </p>
 
-Seekarr keeps your Radarr and Sonarr stack actively searching for missing media and better releases over time, so you do not have to keep manually triggering searches yourself.
+Seekarr keeps Radarr and Sonarr looking for what they missed.
 
-Seekarr is configured from the Web UI. Arr instance URLs, API keys, schedules, and search behavior are stored in SQLite.
+If a movie or episode stays missing after the first search, Seekarr checks again later. If something downloaded but you still want a better release, Seekarr can keep looking for that too.
 
-<!-- screenshots -->
-<img width="1095" height="708" alt="image" src="https://github.com/user-attachments/assets/79c854f6-c56b-47c1-9737-fcf4ec551ac9" />
-<img width="1446" height="897" alt="image" src="https://github.com/user-attachments/assets/1bcfe1b1-bba1-4e4c-a889-2d615d2749a7" />
-<img width="1400" height="774" alt="image" src="https://github.com/user-attachments/assets/8da3fdd8-b83b-4bb2-9400-a58499e127bf" />
+Add your Radarr and Sonarr instances, choose how often each one should run, and let Seekarr do the repeat searching in the background.
 
----
+## Why It Exists
+
+Radarr and Sonarr are good at managing libraries, but sometimes an item just sits there missing. Maybe it was not available yet. Maybe your indexer missed it. Maybe you wanted to try again later without opening the app and clicking search yourself.
+
+I made Seekarr to sit beside Radarr and Sonarr and handle that repeat-search work. It is not trying to replace them. It just gives them another nudge on a schedule you control.
+
+Seekarr helps when:
+
+- A movie or episode stays missing after the first search.
+- You do not want to keep opening Radarr or Sonarr just to click search again.
+- You want Seekarr to keep checking for better releases after something has already downloaded.
+- You have more than one Radarr or Sonarr instance and want Seekarr to run searches for each one.
+- You want repeat searching to happen quietly in the background without flooding your indexers.
+
+## How It Works
+
+1. Connect Seekarr to Radarr and/or Sonarr with their API keys.
+2. Pick how often each instance should run.
+3. Choose whether Seekarr should look for missing items, better releases, or both.
+4. Seekarr checks each instance on schedule and triggers searches when an item is eligible.
+5. The dashboard shows what ran, what searched, and what is coming up next.
+
+## Screenshots
+
+<p>
+  <img src="./docs/screenshots/seekarr-dashboard.png" alt="Seekarr dashboard" width="100%"/>
+</p>
+
+<p>
+  <img src="./docs/screenshots/seekarr-configuration.png" alt="Seekarr configuration screen" width="100%"/>
+</p>
+
+<details>
+<summary>More screenshots</summary>
+
+<p>
+  <img src="./docs/screenshots/seekarr-history.png" alt="Seekarr search history" width="100%"/>
+</p>
+
+<p>
+  <img src="./docs/screenshots/seekarr-login.png" alt="Seekarr login screen" width="100%"/>
+</p>
+
+</details>
 
 ## What It Does
 
-- Re-runs searches for monitored movies and episodes that are still missing.
-- Keeps checking for better releases when you want ongoing upgrades, not just first-time grabs.
-- Lets you set different schedules and behavior for each Radarr or Sonarr instance.
-- Helps avoid wasteful searches with release delays, quiet hours, cooldowns, and rate limits.
+- Missing search: retry movies and episodes that Radarr or Sonarr still does not have.
+- Better release search: keep looking for improved releases after something has already downloaded.
+- Per-instance schedules: run Movies, Shows, 4K, Anime, or any other Arr instance on its own timing.
+- Sonarr search modes: search by episode, season pack, or show batch depending on how you want missing episodes handled.
+- Safety controls: use quiet hours, retry delays, release delays, and rate caps so repeat searching stays controlled.
+- Web UI configuration: manage instances, schedules, history, and search behavior from the browser.
+- Encrypted API keys: Arr API keys are stored encrypted in SQLite.
 
-Upgrade source modes:
+For better-release searching, Seekarr can follow what Radarr/Sonarr already wants upgraded, check existing library items again, or combine both approaches.
 
-- `Wanted List Only`: only search items Arr is currently asking to upgrade.
-- `Monitored Items Only`: search monitored items that already have files so Seekarr can keep looking for better releases.
-- `Both`: combine Arr's current upgrade list with monitored items that already have files.
+## Docker Setup
 
----
+You do not need to build anything. The easiest way to run Seekarr is Docker Compose.
 
+### 1. Install Docker
 
-## Docker Quick Start
+If you are new to Docker:
 
-### Docker Images
+- Windows or macOS: install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+- Linux: install Docker Engine and the Docker Compose plugin from your distro or Docker's install guide.
 
-The image is available on both Docker Hub and GitHub Container Registry:
+Check that Docker works:
 
-- **Docker Hub**: `tumeden/seekarr:latest`
-- **GHCR**: `ghcr.io/tumeden/seekarr:latest`
+```bash
+docker --version
+docker compose version
+```
 
-### Docker Compose
+### 2. Create a Seekarr Folder
+
+Make a folder for Seekarr and its data:
+
+```bash
+mkdir seekarr
+cd seekarr
+mkdir data
+```
+
+### 3. Create `docker-compose.yml`
+
+Pick one image source. Docker Hub is the simplest default.
+
+Use Docker Hub:
 
 ```yaml
 services:
@@ -66,62 +125,141 @@ services:
     restart: unless-stopped
     ports:
       - "8788:8788"
-    # environment:
-    #   - PUID=1000
-    #   - PGID=1000
     volumes:
       - ./data:/data
 ```
 
-Then:
+Or use GitHub Container Registry:
 
-1. Start container.
-2. Open `http://localhost:8788`.
-3. Set Web UI password.
-4. Configure Radarr/Sonarr instances and settings in **Settings**. You can add or remove multiple instances for either app from the UI.
+```yaml
+services:
+  seekarr:
+    image: ghcr.io/tumeden/seekarr:latest
+    container_name: seekarr
+    restart: unless-stopped
+    ports:
+      - "8788:8788"
+    volumes:
+      - ./data:/data
+```
 
-By default the container stores data in `/data/seekarr.db`.
+Save one of those examples as `docker-compose.yml` inside the `seekarr` folder.
 
-### Updating
+### Optional Compose Settings
 
-To update Seekarr to the latest version:
+Most users can skip this section.
+
+If you want the files in `./data` owned by your normal Linux user, add `PUID` and `PGID` under the Seekarr service:
+
+```yaml
+environment:
+  - PUID=1000
+  - PGID=1000
+```
+
+On Linux, you can usually find your values with:
+
+```bash
+id
+```
+
+### 4. Start Seekarr
+
+Run this from the same folder as `docker-compose.yml`:
+
+```bash
+docker compose up -d
+```
+
+Open the Web UI:
+
+```text
+http://localhost:8788
+```
+
+On first launch, Seekarr asks you to create a Web UI password.
+
+### 5. Add Radarr and Sonarr
+
+Open **Configuration** and add your Radarr and/or Sonarr instances.
+
+You need:
+
+- Instance name, such as `Movies` or `Shows`.
+- Arr URL, such as `http://radarr:7878` or `http://sonarr:8989`.
+- Arr API key from Radarr/Sonarr settings.
+
+If Radarr or Sonarr run in the same Docker Compose stack, use their service names:
+
+```text
+http://radarr:7878
+http://sonarr:8989
+```
+
+### 6. Stop, Start, and Update
+
+Stop Seekarr:
+
+```bash
+docker compose down
+```
+
+Start it again:
+
+```bash
+docker compose up -d
+```
+
+Update to the latest image:
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
----
+View logs if something is not working:
 
-## Persistence
+```bash
+docker compose logs -f
+```
 
-Persist `./data`.
+## Data and Persistence
+
+The compose examples mount `./data` on your machine to `/data` in the container. Keep that folder.
 
 It contains:
 
-- `seekarr.db` (state + Web UI settings)
-- `seekarr.masterkey` (key used to decrypt stored Arr API keys)
+- `seekarr.db`: Web UI settings, schedules, state, and history.
+- `seekarr.masterkey`: key used to decrypt stored Arr API keys.
 
-Web UI setting changes are stored in `seekarr.db`.
+Do not lose `seekarr.masterkey` if you want to keep using stored API keys.
 
-If you need to fully reset Seekarr's configured instances and UI settings, stop the app and delete `seekarr.db`. Keep `seekarr.masterkey` unless you intentionally want to discard access to stored API keys as well.
-
----
+To reset Seekarr completely, stop the app and delete `seekarr.db`. Keep `seekarr.masterkey` unless you intentionally want to discard access to stored API keys too.
 
 ## Security
 
-- Web UI requires a password (stored as salted hash in SQLite).
-- Arr API keys entered in Web UI are stored encrypted in SQLite.
-- Do not lose `seekarr.masterkey`, or stored API keys cannot be decrypted.
+- The Web UI requires a password.
+- The Web UI password is stored as a salted hash in SQLite.
+- Arr API keys are encrypted before being stored in SQLite.
+- You should still avoid exposing Seekarr directly to the public internet.
 
----
+## Common Problems
 
-## Common Errors
+`Connection refused` or `unreachable`
 
-- Connection refused/unreachable: Arr URL/port is wrong or unreachable from container.
-- HTTP 401/403: Arr API key is invalid.
+The Arr URL is wrong, or the Seekarr container cannot reach it. If Radarr/Sonarr are in Docker, use their Compose service names. If they are elsewhere, use an address the Seekarr container can reach, such as a LAN IP.
 
----
+`HTTP 401` or `HTTP 403`
+
+The Arr API key is wrong or does not have access.
+
+Searches are not running
+
+Check that the instance is enabled, the schedule is due, quiet hours are not blocking it, and the rate limit has not been reached.
+
+Posters or item links are missing
+
+Seekarr can only show item metadata when it can reach the matching Radarr or Sonarr instance with a valid API key.
 
 ## Related Projects
 

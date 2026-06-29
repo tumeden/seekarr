@@ -15,12 +15,25 @@ if ! command -v python >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ ! -d ".venv" ]; then
+create_venv() {
   echo "Creating Python virtual environment..."
-  python -m venv .venv
+  python -m venv --copies .venv
+}
+
+if [ ! -d ".venv" ]; then
+  create_venv
+elif [ ! -x ".venv/bin/python" ] || ! ".venv/bin/python" -c "import sys" >/dev/null 2>&1; then
+  echo "Existing Python virtual environment is not usable; recreating it..."
+  rm -rf .venv
+  create_venv
 fi
 
 source ".venv/bin/activate"
+
+if ! python -m pip --version >/dev/null 2>&1; then
+  echo "Bootstrapping pip..."
+  python -m ensurepip --upgrade
+fi
 
 if ! python -c "import flask, waitress, requests, cryptography" >/dev/null 2>&1; then
   echo "Installing required Python packages..."

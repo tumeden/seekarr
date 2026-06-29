@@ -20,7 +20,7 @@ from urllib.parse import urlsplit, urlunsplit
 import requests
 from flask import Flask, jsonify, request, send_file
 
-from .arr import ArrRequestError
+from .arr import ArrClient, ArrRequestError
 from .config import ArrConfig, ArrSyncInstanceConfig, RuntimeConfig, load_runtime_config
 from .engine import Engine, _quiet_hours_end_utc
 from .logging_utils import setup_logging
@@ -524,6 +524,68 @@ def create_app(db_path: str | None = None) -> Flask:
             return jsonify({"ok": True})
         except Exception as exc:
             return jsonify({"error": str(exc)}), 400
+
+    @app.post("/api/instances/test_connection")
+    def test_instance_connection() -> Any:
+        payload = request.get_json(silent=True) or {}
+        app_type = str(payload.get("app") or "").strip().lower()
+        if app_type not in ("radarr", "sonarr"):
+            return jsonify({"ok": False, "error": "Invalid app"}), 400
+        try:
+            instance_id = int(payload.get("instance_id") or 0)
+        except (TypeError, ValueError):
+            instance_id = 0
+        try:
+            arr_url = _normalize_arr_url(payload.get("arr_url"), app_type, instance_id or 1)
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        if not arr_url:
+            return jsonify({"ok": False, "error": "Arr URL is required"}), 400
+
+        api_key = str(payload.get("arr_api_key") or "").strip()
+        if not api_key and instance_id > 0:
+            api_key = str(store.get_arr_api_key(app_type, instance_id) or "").strip()
+        if not api_key:
+            return jsonify({"ok": False, "error": "API key is required to test this connection"}), 400
+
+        cfg = _get_config()
+        client = ArrClient(
+            name=app_type,
+            config=ArrConfig(enabled=True, url=arr_url, api_key=api_key),
+            timeout_seconds=max(5, int(cfg.app.request_timeout_seconds or 30)),
+            verify_ssl=bool(cfg.app.verify_ssl),
+            logger=logger,
+        )
+        try:
+            status = client.fetch_system_status()
+        except ArrRequestError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 502
+
+        display_name = str(
+            status.get("instanceName")
+            or status.get("appName")
+            or status.get("branch")
+            or ("Radarr" if app_type == "radarr" else "Sonarr")
+        ).strip()
+        version = str(status.get("version") or "").strip()
+        detected_app = str(status.get("appName") or "").strip().lower()
+        if detected_app in ("radarr", "sonarr") and detected_app != app_type:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": f"Connected, but this looks like {detected_app.title()} instead of {app_type.title()}",
+                        "name": display_name,
+                        "version": version,
+                    }
+                ),
+                400,
+            )
+
+        detail = display_name or app_type.title()
+        if version:
+            detail = f"{detail} {version}"
+        return jsonify({"ok": True, "name": display_name, "version": version, "message": f"Connected to {detail}"})
 
     def _get_config() -> RuntimeConfig:
         with config_lock:
@@ -2129,6 +2191,49 @@ def create_app(db_path: str | None = None) -> Flask:
         return;
       }
 
+      const testBtn = e.target && e.target.closest ? e.target.closest('button[data-test-connection]') : null;
+      if (testBtn) {
+        if (testBtn.disabled) return;
+        const card = testBtn.closest('.settings-instance-card');
+        if (!card) return;
+        const app = String(testBtn.getAttribute('data-app') || card.getAttribute('data-app') || '').trim();
+        const instanceId = Number(testBtn.getAttribute('data-id') || card.getAttribute('data-id') || 0);
+        const arrUrl = String(card.querySelector('.si_url')?.value || '').trim();
+        const apiKey = String(card.querySelector('.si_apikey')?.value || '').trim();
+        if (!app || !instanceId) return;
+        testBtn.disabled = true;
+        msg.textContent = 'Testing connection...';
+        settingsStatusMessage = 'Testing connection...';
+        syncSettingsSaveFab();
+        try {
+          const r = await apiFetch('/api/instances/test_connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ app, instance_id: instanceId, arr_url: arrUrl, arr_api_key: apiKey }),
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok || !data.ok) {
+            const text = data.error || 'Connection test failed';
+            msg.textContent = text;
+            settingsStatusMessage = text;
+            showToast('Connection Failed', text, 'error');
+            return;
+          }
+          const text = data.message || 'Connection OK';
+          msg.textContent = text;
+          settingsStatusMessage = text;
+          showToast('Connection OK', text);
+        } catch (err) {
+          msg.textContent = 'Connection test failed';
+          settingsStatusMessage = 'Connection test failed';
+          showToast('Connection Failed', 'Connection test failed', 'error');
+        } finally {
+          testBtn.disabled = false;
+          syncSettingsSaveFab();
+        }
+        return;
+      }
+
       const clearBtn = e.target && e.target.closest ? e.target.closest('button[data-clear-key]') : null;
       if (!clearBtn) return;
       if (clearBtn.disabled) return;
@@ -2360,7 +2465,7 @@ def create_app(db_path: str | None = None) -> Flask:
             </div>
         `;
         wrap.innerHTML += `
-          <div class="card settings-tab-content settings-instance-card" id="settings-tab-${safe(key)}" data-app="${safe(inst.app)}" data-key="${safe(key)}">
+          <div class="card settings-tab-content settings-instance-card" id="settings-tab-${safe(key)}" data-app="${safe(inst.app)}" data-id="${safe(inst.instance_id)}" data-key="${safe(key)}">
             <div class="instance-head settings-instance-head">
               <div>
                 <div class="instance-title settings-instance-title">
@@ -2399,6 +2504,10 @@ def create_app(db_path: str | None = None) -> Flask:
                   </div>
                   <div class="inline-input settings-api-key-row">
                     <input class="cfg mono si_apikey" name="settings_${safe(key)}_api_key" type="password" value="" placeholder="${inst.api_key_set ? '********' : '(not set)'}"/>
+                    <button class="icon-btn settings-test-connection-btn" type="button" title="Test connection"
+                            data-test-connection="1" data-app="${safe(inst.app)}" data-id="${safe(inst.instance_id)}">
+                      Test
+                    </button>
                     <button class="icon-btn danger" type="button" title="Delete stored API key"
                             data-clear-key="1" data-app="${safe(inst.app)}" data-id="${safe(inst.instance_id)}" ${inst.api_key_set ? '' : 'disabled'}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">

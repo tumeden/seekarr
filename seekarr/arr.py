@@ -260,6 +260,16 @@ class ArrClient:
             return []
         return [row for row in payload if isinstance(row, dict)]
 
+    def fetch_system_status(self) -> dict[str, Any]:
+        """
+        Fetch lightweight Arr system metadata.
+        Used by the Web UI to validate URL/API key settings without triggering searches.
+        """
+        payload = self._request("GET", "/api/v3/system/status")
+        if not isinstance(payload, dict):
+            return {}
+        return payload
+
     def fetch_queue_episode_ids(self) -> set[int]:
         """
         Sonarr helper.

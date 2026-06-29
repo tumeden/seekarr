@@ -2449,6 +2449,20 @@ body {
   flex: 1;
 }
 
+.settings-test-connection-btn {
+  border-color: rgba(249, 115, 22, 0.32);
+  background: rgba(249, 115, 22, 0.14);
+  color: rgba(255, 237, 213, 0.98);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.settings-test-connection-btn:hover {
+  border-color: rgba(249, 115, 22, 0.55);
+  background: rgba(249, 115, 22, 0.20);
+}
+
 .danger-panel {
   border-color: rgba(239, 68, 68, 0.22);
   background: linear-gradient(180deg, rgba(55, 18, 22, 0.72), rgba(33, 10, 14, 0.92));

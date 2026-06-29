@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from seekarr.config import ArrConfig
 from seekarr.webui import create_app
 
 
@@ -329,3 +330,160 @@ def test_settings_reject_weird_instance_name_characters(tmp_path: Path) -> None:
     )
     assert saved.status_code == 400
     assert "letters, numbers, spaces, dots, dashes, and underscores" in saved.get_json()["error"]
+
+
+def test_instance_connection_test_uses_supplied_url_and_key(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "seekarr.db"
+    calls: list[tuple[str, ArrConfig]] = []
+
+    class FakeArrClient:
+        def __init__(self, name, config, timeout_seconds, verify_ssl, logger):  # noqa: ANN001
+            calls.append((name, config))
+
+        def fetch_system_status(self) -> dict[str, str]:
+            return {"appName": "Radarr", "instanceName": "Movies", "version": "5.1.2"}
+
+    monkeypatch.setattr("seekarr.webui.ArrClient", FakeArrClient)
+
+    app = create_app(str(db_path))
+    client = app.test_client()
+    headers = _bootstrap_password(client)
+
+    tested = client.post(
+        "/api/instances/test_connection",
+        headers=headers,
+        json={
+            "app": "radarr",
+            "instance_id": 1,
+            "arr_url": "HTTP://radarr-main:7878/",
+            "arr_api_key": "abc123",
+        },
+    )
+
+    assert tested.status_code == 200
+    body = tested.get_json()
+    assert body["ok"] is True
+    assert body["message"] == "Connected to Movies 5.1.2"
+    assert calls[0][0] == "radarr"
+    assert calls[0][1].url == "http://radarr-main:7878"
+    assert calls[0][1].api_key == "abc123"
+
+
+def test_instance_connection_test_uses_stored_key_when_input_key_is_blank(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "seekarr.db"
+    calls: list[ArrConfig] = []
+
+    class FakeArrClient:
+        def __init__(self, name, config, timeout_seconds, verify_ssl, logger):  # noqa: ANN001
+            calls.append(config)
+
+        def fetch_system_status(self) -> dict[str, str]:
+            return {"appName": "Sonarr", "version": "4.0.0"}
+
+    monkeypatch.setattr("seekarr.webui.ArrClient", FakeArrClient)
+
+    app = create_app(str(db_path))
+    client = app.test_client()
+    headers = _bootstrap_password(client)
+
+    saved = client.post(
+        "/api/settings",
+        headers=headers,
+        json={
+            "app": {},
+            "instances": [
+                {
+                    "app": "sonarr",
+                    "instance_id": 1,
+                    "instance_name": "Sonarr Main",
+                    "enabled": True,
+                    "interval_minutes": 15,
+                    "search_missing": True,
+                    "search_cutoff_unmet": True,
+                    "upgrade_scope": "wanted",
+                    "search_order": "smart",
+                    "quiet_hours_start": "23:00",
+                    "quiet_hours_end": "06:00",
+                    "min_hours_after_release": 8,
+                    "min_seconds_between_actions": 2,
+                    "max_missing_actions_per_instance_per_sync": 5,
+                    "max_cutoff_actions_per_instance_per_sync": 1,
+                    "sonarr_missing_mode": "smart",
+                    "item_retry_hours": 72,
+                    "rate_window_minutes": 60,
+                    "rate_cap": 25,
+                    "arr_url": "http://sonarr-main:8989",
+                    "arr_api_key": "stored-key",
+                }
+            ],
+        },
+    )
+    assert saved.status_code == 200
+
+    tested = client.post(
+        "/api/instances/test_connection",
+        headers=headers,
+        json={
+            "app": "sonarr",
+            "instance_id": 1,
+            "arr_url": "http://sonarr-main:8989",
+            "arr_api_key": "",
+        },
+    )
+
+    assert tested.status_code == 200
+    assert tested.get_json()["ok"] is True
+    assert calls[0].api_key == "stored-key"
+
+
+def test_instance_connection_test_requires_api_key_without_stored_key(tmp_path: Path) -> None:
+    db_path = tmp_path / "seekarr.db"
+
+    app = create_app(str(db_path))
+    client = app.test_client()
+    headers = _bootstrap_password(client)
+
+    tested = client.post(
+        "/api/instances/test_connection",
+        headers=headers,
+        json={
+            "app": "radarr",
+            "instance_id": 1,
+            "arr_url": "http://radarr-main:7878",
+            "arr_api_key": "",
+        },
+    )
+
+    assert tested.status_code == 400
+    assert tested.get_json()["error"] == "API key is required to test this connection"
+
+
+def test_instance_connection_test_rejects_wrong_arr_app(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "seekarr.db"
+
+    class FakeArrClient:
+        def __init__(self, name, config, timeout_seconds, verify_ssl, logger):  # noqa: ANN001
+            pass
+
+        def fetch_system_status(self) -> dict[str, str]:
+            return {"appName": "Radarr", "version": "5.1.2"}
+
+    monkeypatch.setattr("seekarr.webui.ArrClient", FakeArrClient)
+
+    app = create_app(str(db_path))
+    client = app.test_client()
+    headers = _bootstrap_password(client)
+
+    tested = client.post(
+        "/api/instances/test_connection",
+        headers=headers,
+        json={
+            "app": "sonarr",
+            "instance_id": 1,
+            "arr_url": "http://radarr-main:7878",
+            "arr_api_key": "abc123",
+        },
+    )
+
+    assert tested.status_code == 400
+    assert tested.get_json()["error"] == "Connected, but this looks like Radarr instead of Sonarr"

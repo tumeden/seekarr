@@ -2991,22 +2991,22 @@ body {
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
 }
 
-.topbar-title-wrap h1 {
-  font-size: 28px;
-  letter-spacing: 0;
-}
-
-.topbar-title-wrap p {
-  color: rgba(139, 152, 170, 0.96);
-}
-
 .content-canvas {
-  margin-top: 16px;
+  margin-top: 0;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+}
+
+#msg {
+  display: block;
+  margin: 0 0 12px;
+}
+
+#msg:empty {
+  display: none;
 }
 
 .content-section {

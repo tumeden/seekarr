@@ -1,15 +1,28 @@
     function renderHistorySection(data, instances) {
       const runsWrap = document.getElementById('runs-wrap');
       const sh = data.search_history || {};
-      if (!window.historyActiveTab && instances.length > 0) {
-        window.historyActiveTab = `${instances[0].app}:${instances[0].instance_id}`;
-      }
       if (!window.historyPage) window.historyPage = {};
 
-      const PAGE_SIZE = 10;
+      const PAGE_SIZE = 24;
+      const historyInstances = instances.filter(inst => {
+        const key = `${inst.app}:${inst.instance_id}`;
+        return Array.isArray(sh[key]) && sh[key].length > 0;
+      });
+
+      if (!window.historyActiveTab && historyInstances.length > 0) {
+        window.historyActiveTab = `${historyInstances[0].app}:${historyInstances[0].instance_id}`;
+      }
+      if (
+        window.historyActiveTab &&
+        !historyInstances.some(inst => `${inst.app}:${inst.instance_id}` === window.historyActiveTab)
+      ) {
+        window.historyActiveTab = historyInstances.length
+          ? `${historyInstances[0].app}:${historyInstances[0].instance_id}`
+          : '';
+      }
 
       let tabsHtml = '<div class="history-tabs">';
-      instances.forEach(inst => {
+      historyInstances.forEach(inst => {
         const key = `${inst.app}:${inst.instance_id}`;
         const isActive = (window.historyActiveTab === key);
         tabsHtml += `<button class="tab-btn history-tab ${isActive ? 'active' : ''}" onclick='window.setHistoryTab(${JSON.stringify(key)}); return false;' type="button">${safe(inst.app).toUpperCase()} - ${safe(inst.instance_name)}</button>`;
@@ -17,7 +30,7 @@
       tabsHtml += '</div>';
 
       let contentHtml = '';
-      const activeInst = instances.find(inst => `${inst.app}:${inst.instance_id}` === window.historyActiveTab);
+      const activeInst = historyInstances.find(inst => `${inst.app}:${inst.instance_id}` === window.historyActiveTab);
       if (activeInst) {
         const key = window.historyActiveTab;
         const rows = sh[key] || [];
@@ -78,6 +91,12 @@
             </div>
             ${paginationHtml}
           </div>`;
+      } else {
+        contentHtml = `
+          <div class="card history-card">
+            <div class="mono history-empty">No searches recorded yet.</div>
+          </div>`;
+        tabsHtml = '';
       }
 
       runsWrap.innerHTML = tabsHtml + contentHtml;

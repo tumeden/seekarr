@@ -309,31 +309,9 @@
       }
       return { label: '', className: '', typeLabel };
     }
-    const sectionMeta = {
-      dashboard: {
-        title: 'Dashboard',
-        subtitle: 'Overview, schedules, and recent search activity.',
-      },
-      runs: {
-        title: 'History',
-        subtitle: 'Per-instance search history and recent activity.',
-      },
-      settings: {
-        title: 'Configuration',
-        subtitle: 'Global settings, instance controls, and automation behavior.',
-      },
-    };
-    function syncTopbar(name) {
-      const meta = sectionMeta[name] || sectionMeta.dashboard;
-      const title = document.getElementById('topbar-title');
-      const subtitle = document.getElementById('topbar-subtitle');
-      if (title) title.textContent = meta.title;
-      if (subtitle) subtitle.textContent = meta.subtitle;
-    }
     function setSection(name) {
       document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
       document.getElementById(`section-${name}`)?.classList.add('active');
       document.querySelectorAll('.nav-control').forEach(a => a.classList.remove('active'));
       document.querySelectorAll(`.nav-control[data-section="${name}"]`).forEach(a => a.classList.add('active'));
-      syncTopbar(name);
     }

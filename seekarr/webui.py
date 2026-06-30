@@ -979,14 +979,15 @@ def create_app(db_path: str | None = None) -> Flask:
         for inst in config.sonarr_instances:
             instance_last_run[f"sonarr:{inst.instance_id}"] = store.get_last_instance_run("sonarr", inst.instance_id)
 
+        history_limit = 240
         search_history: dict[str, Any] = {}
         for inst in cfg.radarr_instances:
             search_history[f"radarr:{inst.instance_id}"] = store.get_recent_search_actions(
-                "radarr", inst.instance_id, 50
+                "radarr", inst.instance_id, history_limit
             )
         for inst in cfg.sonarr_instances:
             search_history[f"sonarr:{inst.instance_id}"] = store.get_recent_search_actions(
-                "sonarr", inst.instance_id, 50
+                "sonarr", inst.instance_id, history_limit
             )
 
         return jsonify(

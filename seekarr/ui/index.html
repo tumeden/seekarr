@@ -106,23 +106,13 @@
       </div>
     </aside>
     <main class="main">
-      <header class="topbar">
-        <div class="topbar-copy">
-          <div class="topbar-title-wrap">
-            <h1 id="topbar-title">Dashboard</h1>
-            <p id="topbar-subtitle">Overview, schedules, and recent search activity.</p>
-          </div>
-        </div>
-        <div class="topbar-actions">
-          <span class="topbar-message" id="msg"></span>
-        </div>
-      </header>
       <div class="content-canvas">
       <div class="mobile-nav" aria-label="Sections">
         <button class="mobile-nav-item nav-control active" data-section="dashboard" type="button">Dashboard</button>
         <button class="mobile-nav-item nav-control" data-section="runs" type="button">History</button>
         <button class="mobile-nav-item nav-control" data-section="settings" type="button">Configuration</button>
       </div>
+      <span class="topbar-message" id="msg"></span>
       
       <section class="content-section active" id="section-dashboard">
         <div class="dashboard-header">
@@ -149,10 +139,7 @@
 
 
       <section class="content-section" id="section-runs">
-        <div class="card">
-          <h3>Search History (Per Instance)</h3>
-          <div id="runs-wrap"></div>
-        </div>
+        <div id="runs-wrap"></div>
       </section>
 
       <section class="content-section" id="section-settings">

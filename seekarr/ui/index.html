@@ -1,0 +1,229 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Seekarr</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=__ASSET_CACHE_KEY__"/>
+</head>
+<body class="auth-locked">
+  <div class="modal auth-splash" id="auth-modal">
+    <div class="modal-card auth-splash-card">
+      <div class="auth-panel">
+        <div class="auth-splash-brand">
+<img src="/assets/banner.svg" alt="Seekarr banner"/>
+        </div>
+        <div class="auth-panel-head">
+          <div class="auth-panel-copy" id="auth-sub">Enter your Web UI password.</div>
+        </div>
+        <div class="modal-body">
+          <div class="field auth-field">
+            <div class="label" id="auth-label">Password</div>
+            <div class="auth-inline">
+              <input class="cfg mono" id="auth-password" name="seekarr_webui_password" type="password" value=""
+                     autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
+              <button class="btn-primary auth-submit" id="auth-submit">Continue</button>
+            </div>
+            <div class="subline auth-field-hint" id="auth-hint"></div>
+          </div>
+          <div class="subline auth-error" id="auth-error"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal" id="delete-instance-modal">
+    <div class="modal-card">
+      <div class="modal-row">
+        <div class="modal-title">Remove Instance</div>
+      </div>
+      <div class="modal-body">
+        <div id="delete-instance-sub" style="font-size:15px; line-height:1.45; color:var(--text-secondary);"></div>
+        <div
+          id="delete-instance-warning"
+          style="display:none; margin-top:12px; padding:12px; border-radius:10px; border:1px solid rgba(245, 158, 11, 0.22); background:rgba(245, 158, 11, 0.08); color:rgba(253, 230, 138, 0.96); font-size:13px; line-height:1.45;"
+        ></div>
+        <div class="subline" style="margin-top:12px; color:rgba(254, 202, 202, 0.92);">
+          This removes the instance configuration, stored API key, schedule state, and instance-specific history.
+        </div>
+        <div class="field" style="margin-top:16px;">
+          <div class="label">Current Web UI Password</div>
+          <input
+            class="cfg mono"
+            id="delete-instance-password"
+            name="seekarr_delete_password"
+            type="password"
+            value=""
+            autocomplete="current-password"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+          />
+        </div>
+        <div class="subline" id="delete-instance-error" style="margin-top:10px; color: rgba(254, 202, 202, 0.98);"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="delete-instance-cancel" type="button">CANCEL</button>
+        <button class="btn-danger" id="delete-instance-submit" type="button">REMOVE INSTANCE</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="/assets/sidebar-brand.svg" alt="Seekarr search automation" class="sidebar-brand-image"/>
+      </div>
+      <nav class="sidebar-nav" aria-label="Primary">
+      <a class="nav-item nav-control active" data-section="dashboard" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+        Dashboard
+      </a>
+
+      <a class="nav-item nav-control" data-section="runs" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+        History
+      </a>
+      <a class="nav-item nav-control" data-section="settings" href="#">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        Configuration
+      </a>
+      </nav>
+      <div class="sidebar-badges">
+        <a class="sidebar-badge" href="https://github.com/tumeden/seekarr" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a class="sidebar-badge" href="https://hub.docker.com/r/tumeden/seekarr" target="_blank" rel="noopener noreferrer">Docker Hub</a>
+        <a class="sidebar-badge sidebar-badge-support" href="https://ko-fi.com/tumeden" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 6h9a1 1 0 0 1 1 1v7a4 4 0 0 1-4 4h-3a4 4 0 0 1-4-4V7a1 1 0 0 1 1-1z"></path><path d="M17 8h1.5a2.5 2.5 0 0 1 0 5H17"></path><path d="M8 3c0 1 .7 1.6 1.4 2.2.7.6 1.4 1.2 1.4 2.3"></path><path d="M12 3c0 1 .7 1.6 1.4 2.2.7.6 1.4 1.2 1.4 2.3"></path></svg>
+          Donate a coffee
+        </a>
+      </div>
+      <div class="sidebar-version">
+        <span id="version-chip">Version --</span>
+        <a id="update-chip" href="https://github.com/tumeden/seekarr/releases/latest"
+           target="_blank" rel="noopener noreferrer" style="display:none;">Update available</a>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-copy">
+          <div class="topbar-title-wrap">
+            <h1 id="topbar-title">Dashboard</h1>
+            <p id="topbar-subtitle">Overview, schedules, and recent search activity.</p>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <span class="topbar-message" id="msg"></span>
+        </div>
+      </header>
+      <div class="content-canvas">
+      <div class="mobile-nav" aria-label="Sections">
+        <button class="mobile-nav-item nav-control active" data-section="dashboard" type="button">Dashboard</button>
+        <button class="mobile-nav-item nav-control" data-section="runs" type="button">History</button>
+        <button class="mobile-nav-item nav-control" data-section="settings" type="button">Configuration</button>
+      </div>
+      
+      <section class="content-section active" id="section-dashboard">
+        <div class="dashboard-header">
+          <div class="dashboard-brand">
+            <img src="/assets/logo.svg" alt="Seekarr logo" class="dashboard-brand-logo"/>
+            <div class="dashboard-brand-copy">
+              <h1>Seekarr</h1>
+              <div class="dashboard-brand-tagline">Missing + upgrade search automation</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cards-grid" id="instance-cards"></div>
+
+        <div class="card recent-actions-card">
+          <div class="section-head">
+            <h3>Recent Actions</h3>
+            <div class="subline">Across all configured instances</div>
+          </div>
+          <div id="recent-actions" class="recent-actions-list">-</div>
+        </div>
+      </section>
+
+
+
+      <section class="content-section" id="section-runs">
+        <div class="card">
+          <h3>Search History (Per Instance)</h3>
+          <div id="runs-wrap"></div>
+        </div>
+      </section>
+
+      <section class="content-section" id="section-settings">
+        <div class="settings-head">
+          <div class="settings-head-block settings-tabs-block">
+            <div class="settings-tabs" id="settings-tabs"></div>
+          </div>
+        </div>
+        
+        <div id="settings-content-wrapper">
+          <div class="card settings-tab-content settings-global-card" id="settings-tab-global">
+            <div class="settings-global-head">
+              <svg class="settings-global-icon" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+              <div>
+                <h3>Global Configuration</h3>
+                <div class="subline settings-global-copy">App-wide settings affecting all instances.</div>
+              </div>
+            </div>
+
+            <div class="settings-global-section settings-global-preferences">
+              <div class="settings-global-preferences-copy">
+                <h4>Global Preferences</h4>
+                <div class="subline">Shared settings used across every configured instance.</div>
+              </div>
+              <div class="settings-global-preferences-grid">
+                <div class="field settings-global-field">
+                  <div class="label">Date Format</div>
+                  <select id="settings-date-format" name="seekarr_date_format" class="cfg">
+                    <option value="iso">YYYY-MM-DD</option>
+                    <option value="us">MM/DD/YYYY</option>
+                    <option value="eu">DD/MM/YYYY</option>
+                  </select>
+                </div>
+                <div class="field settings-global-field">
+                  <div class="label">Clock Format</div>
+                  <select id="settings-time-format" name="seekarr_time_format" class="cfg">
+                    <option value="24h">24-hour</option>
+                    <option value="12h">12-hour</option>
+                  </select>
+                </div>
+                <div class="field settings-global-field settings-global-field-wide">
+                  <div class="label">Sleep Window Timezone</div>
+                  <input id="settings-quiet-timezone" name="seekarr_quiet_timezone" class="cfg mono" type="text" list="timezone-options"
+                         placeholder="Search timezone (example: America/New_York)"/>
+                  <datalist id="timezone-options"></datalist>
+                </div>
+              </div>
+              <div class="subline settings-global-help">
+                Used for sleep window start/end evaluation. Leave empty to use the server timezone.
+              </div>
+            </div>
+          </div>
+          
+          <div id="settings-instance-cards"></div>
+        </div>
+      </section>
+      </div>
+    </main>
+  </div>
+  <div class="settings-save-fab" id="settings-save-fab">
+    <span class="subline" id="settings-msg"></span>
+    <button class="btn-primary save-button" id="save-settings" type="button">SAVE CONFIGURATION</button>
+  </div>
+  <div class="toast-stack" id="toast-stack"></div>
+  <script src="/assets/js/state.js?v=__ASSET_CACHE_KEY__" defer></script>
+  <script src="/assets/js/auth.js?v=__ASSET_CACHE_KEY__" defer></script>
+  <script src="/assets/js/utils/common.js?v=__ASSET_CACHE_KEY__" defer></script>
+  <script src="/assets/js/dashboard.js?v=__ASSET_CACHE_KEY__" defer></script>
+  <script src="/assets/js/history.js?v=__ASSET_CACHE_KEY__" defer></script>
+  <script src="/assets/js/refresh.js?v=__ASSET_CACHE_KEY__" defer></script>
+  <script src="/assets/js/settings.js?v=__ASSET_CACHE_KEY__" defer></script>
+  <script src="/assets/js/init.js?v=__ASSET_CACHE_KEY__" defer></script>
+</body>
+</html>

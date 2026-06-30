@@ -1,7 +1,7 @@
 # Seekarr
 
 <p align="center">
-  <img src="./seekarr/assets/seekarr-banner.svg" alt="Seekarr banner" width="100%"/>
+  <img src="./seekarr/ui/assets/seekarr-banner.svg" alt="Seekarr banner" width="100%"/>
 </p>
 
 <p align="center">

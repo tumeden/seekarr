@@ -658,6 +658,8 @@ table.history td.title {
   height: 78px;
   border-radius: 10px;
   overflow: hidden;
+  contain: layout paint;
+  isolation: isolate;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)),
     radial-gradient(80px 60px at 20% 10%, rgba(249, 115, 22, 0.14), transparent 70%);
@@ -674,7 +676,7 @@ table.history td.title {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: scale(1.02);
+  backface-visibility: hidden;
 }
 
 .history-entry-main {
@@ -902,6 +904,8 @@ body {
   height: 82px;
   border-radius: 10px;
   overflow: hidden;
+  contain: layout paint;
+  isolation: isolate;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)),
     radial-gradient(80px 60px at 20% 10%, rgba(249, 115, 22, 0.14), transparent 70%);
@@ -918,7 +922,7 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: scale(1.02);
+  backface-visibility: hidden;
 }
 
 .recent-action-time {
@@ -2143,6 +2147,23 @@ body {
   align-items: center;
 }
 
+.history-load-panel {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.history-load-status {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.history-scroll-sentinel {
+  height: 1px;
+}
+
 .page-status {
   display: flex;
   align-items: center;
@@ -2241,6 +2262,96 @@ body {
 .settings-global-field-wide {
   max-width: none;
   grid-column: 1 / -1;
+}
+
+.settings-slider-card {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.settings-slider-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.settings-slider-value {
+  color: rgba(226, 232, 240, 0.95);
+  font-size: 13px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.settings-range {
+  appearance: none;
+  width: 100%;
+  height: 10px;
+  border: 0;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, rgba(148, 163, 184, 0.9) 0%, rgba(148, 163, 184, 0.9) var(--range-fill, 4.2%), rgba(30, 36, 48, 0.92) var(--range-fill, 4.2%), rgba(30, 36, 48, 0.92) 100%);
+  cursor: pointer;
+  padding: 0;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.16);
+}
+
+.settings-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 247, 237, 0.96);
+  border-radius: 999px;
+  background: #e5e7eb;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.settings-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 247, 237, 0.96);
+  border-radius: 999px;
+  background: #e5e7eb;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.settings-range:focus-visible {
+  outline: 2px solid rgba(148, 163, 184, 0.65);
+  outline-offset: 5px;
+}
+
+.settings-range-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+  color: rgba(148, 163, 184, 0.82);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.settings-cache-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.btn-mini-cache-clear {
+  width: auto;
+  min-width: 0;
+  padding: 5px 12px;
+  background: rgba(249, 115, 22, 0.16);
+  color: rgba(255, 237, 213, 0.98);
+  border-color: rgba(249, 115, 22, 0.42);
+  box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.08) inset;
+}
+
+.btn-mini-cache-clear:hover {
+  background: rgba(249, 115, 22, 0.24);
+  border-color: rgba(251, 146, 60, 0.7);
 }
 
 .settings-global-help {
@@ -3907,4 +4018,41 @@ select.cfg:focus {
   .settings-instance-settings .settings-toggle-group {
     grid-template-columns: 1fr;
   }
+}
+
+/* History can contain hundreds of cards. Keep its scroll path cheap to avoid
+   browser checkerboarding/gray gaps during fast fling scrolling. */
+#section-runs {
+  overflow-x: hidden;
+  min-width: 0;
+}
+
+.history-card {
+  overflow-x: hidden;
+  min-width: 0;
+  background: #10141d;
+  box-shadow: none;
+}
+
+.history-list-wrap,
+.history-list,
+.history-list-item,
+.history-entry,
+.history-entry-main {
+  min-width: 0;
+}
+
+.history-list {
+  contain: layout;
+}
+
+.history-list-item {
+  background: #0b0f17;
+  box-shadow: none;
+  contain: layout paint;
+}
+
+.history-entry-cover-wrap {
+  background: #171b24;
+  box-shadow: none;
 }

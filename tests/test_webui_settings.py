@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from seekarr.config import ArrConfig
+from seekarr.state import StateStore
 from seekarr.webui import create_app
 
 
@@ -22,7 +23,7 @@ def test_settings_can_create_multiple_radarr_instances_from_empty_db(tmp_path: P
     assert initial.get_json()["instances"] == []
 
     payload = {
-        "app": {"quiet_hours_timezone": "America/Halifax"},
+        "app": {"quiet_hours_timezone": "America/Halifax", "history_limit": 123},
         "instances": [
             {
                 "app": "radarr",
@@ -80,6 +81,7 @@ def test_settings_can_create_multiple_radarr_instances_from_empty_db(tmp_path: P
     assert refreshed.status_code == 200
     body = refreshed.get_json()
     assert body["app"]["quiet_hours_timezone"] == "America/Halifax"
+    assert body["app"]["history_limit"] == 123
     assert [(row["app"], row["instance_id"], row["instance_name"]) for row in body["instances"]] == [
         ("radarr", 1, "Radarr Main"),
         ("radarr", 2, "Radarr 4K"),
@@ -89,6 +91,109 @@ def test_settings_can_create_multiple_radarr_instances_from_empty_db(tmp_path: P
         "http://radarr-b:7878",
     ]
     assert [row["quiet_hours_enabled"] for row in body["instances"]] == [True, False]
+
+
+def test_settings_defaults_history_limit_to_240_for_new_db(tmp_path: Path) -> None:
+    db_path = tmp_path / "seekarr.db"
+
+    app = create_app(str(db_path))
+    client = app.test_client()
+    headers = _bootstrap_password(client)
+
+    resp = client.get("/api/settings", headers=headers)
+    assert resp.status_code == 200
+    assert resp.get_json()["app"]["history_limit"] == 240
+
+
+def test_status_uses_configured_history_limit(tmp_path: Path) -> None:
+    db_path = tmp_path / "seekarr.db"
+    store = StateStore(str(db_path))
+    store.set_ui_app_settings(history_limit=30)
+    store.upsert_ui_instance_settings(
+        "radarr",
+        1,
+        {
+            "instance_name": "Radarr Main",
+            "enabled": 1,
+            "interval_minutes": 15,
+            "search_missing": 1,
+            "search_cutoff_unmet": 1,
+            "upgrade_scope": "wanted",
+            "search_order": "smart",
+            "quiet_hours_enabled": 1,
+            "quiet_hours_start": "23:00",
+            "quiet_hours_end": "06:00",
+            "min_hours_after_release": 8,
+            "min_seconds_between_actions": 2,
+            "max_missing_actions_per_instance_per_sync": 5,
+            "max_cutoff_actions_per_instance_per_sync": 1,
+            "sonarr_missing_mode": "smart",
+            "item_retry_hours": 72,
+            "rate_window_minutes": 60,
+            "rate_cap": 25,
+            "arr_url": "http://radarr-main:7878",
+        },
+    )
+    for idx in range(35):
+        store.record_search_action("radarr", 1, "Radarr Main", f"movie:{idx}", "missing", f"Movie {idx}")
+
+    app = create_app(str(db_path))
+    client = app.test_client()
+    headers = _bootstrap_password(client)
+
+    resp = client.get("/api/status", headers=headers)
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["config"]["app"]["history_limit"] == 30
+    assert len(body["search_history"]["radarr:1"]) == 30
+    assert body["search_history"]["radarr:1"][0]["title"] == "Movie 34"
+    assert body["search_history"]["radarr:1"][-1]["title"] == "Movie 5"
+
+
+def test_saving_lower_history_limit_prunes_unreferenced_media_cache(tmp_path: Path) -> None:
+    db_path = tmp_path / "seekarr.db"
+    cache_dir = tmp_path / "media_cache"
+    cache_dir.mkdir()
+    store = StateStore(str(db_path))
+    store.set_ui_app_settings(history_limit=240, cache_images=True)
+
+    for idx in range(31):
+        name = f"{idx:064x}.jpg"
+        (cache_dir / name).write_bytes(f"image {idx}".encode("utf-8"))
+        store.record_search_action(
+            "radarr",
+            1,
+            "Radarr Main",
+            f"movie:{idx}",
+            "missing",
+            f"Movie {idx}",
+            cover_url=f"/media_cache/{name}",
+        )
+
+    app = create_app(str(db_path))
+    client = app.test_client()
+    headers = _bootstrap_password(client)
+
+    resp = client.post(
+        "/api/settings",
+        headers=headers,
+        json={
+            "app": {
+                "history_limit": 30,
+                "cache_images": True,
+                "image_cache_retention_days": 30,
+            },
+            "instances": [],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["ok"] is True
+
+    assert not (cache_dir / f"{0:064x}.jpg").exists()
+    assert (cache_dir / f"{30:064x}.jpg").exists()
+    rows = store.get_recent_search_actions("radarr", 1, limit=100)
+    assert len(rows) == 30
+    assert rows[-1]["title"] == "Movie 1"
 
 
 def test_delete_instance_endpoint_removes_instance_and_credentials(tmp_path: Path) -> None:

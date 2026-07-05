@@ -14,6 +14,87 @@ def test_count_search_actions_for_item(tmp_path) -> None:
     assert store.count_search_actions_for_item("sonarr", 1, "season:10:1") == 2
 
 
+def test_search_action_media_roundtrip_and_backfill(tmp_path) -> None:
+    store = StateStore(str(tmp_path / "seekarr.db"))
+    store.record_search_action(
+        "sonarr",
+        1,
+        "Sonarr",
+        "series:10",
+        "missing",
+        "Show Batch",
+        item_url="https://arr.example/series/show",
+        cover_url="https://arr.example/media/poster.jpg",
+    )
+    row = store.get_recent_search_actions("sonarr", 1, limit=1)[0]
+    assert row["item_url"] == "https://arr.example/series/show"
+    assert row["cover_url"] == "https://arr.example/media/poster.jpg"
+
+    store.record_search_action("sonarr", 1, "Sonarr", "series:11", "missing", "Other Show")
+    store.set_search_action_media(
+        "sonarr",
+        1,
+        "series:11",
+        item_url="https://arr.example/series/other-show",
+        cover_url="https://arr.example/media/other-poster.jpg",
+    )
+    backfilled = store.get_recent_search_actions("sonarr", 1, limit=2)[0]
+    assert backfilled["item_url"] == "https://arr.example/series/other-show"
+    assert backfilled["cover_url"] == "https://arr.example/media/other-poster.jpg"
+
+
+def test_search_action_media_backfill_selection_and_checked_marker(tmp_path) -> None:
+    store = StateStore(str(tmp_path / "seekarr.db"))
+    store.record_search_action("radarr", 1, "Radarr", "movie:1", "missing", "Missing Media")
+    store.record_search_action(
+        "radarr",
+        1,
+        "Radarr",
+        "movie:2",
+        "missing",
+        "Remote Cover",
+        item_url="https://arr.example/movie/2",
+        cover_url="https://img.example/movie-2.jpg",
+    )
+    with store._connect() as conn:
+        conn.execute("UPDATE search_action SET media_checked_at = '' WHERE item_key = 'movie:2'")
+    store.record_search_action(
+        "radarr",
+        1,
+        "Radarr",
+        "movie:3",
+        "missing",
+        "Local Cover",
+        item_url="https://arr.example/movie/3",
+        cover_url="/media_cache/" + ("a" * 64) + ".jpg",
+    )
+
+    rows = store.get_search_actions_needing_media_backfill(limit=10)
+    assert [row["item_key"] for row in rows] == ["movie:2", "movie:1"]
+
+    store.mark_search_action_media_checked("radarr", 1, "movie:1")
+    rows = store.get_search_actions_needing_media_backfill(limit=10)
+    assert [row["item_key"] for row in rows] == ["movie:2"]
+
+    store.mark_search_action_media_checked("radarr", 1, "movie:2")
+    rows = store.get_search_actions_needing_media_backfill(limit=10)
+    assert [row["item_key"] for row in rows] == []
+
+
+def test_clear_local_search_action_cover_urls(tmp_path) -> None:
+    store = StateStore(str(tmp_path / "seekarr.db"))
+    local_cover = "/media_cache/" + ("a" * 64) + ".jpg"
+    remote_cover = "https://img.example/poster.jpg"
+    store.record_search_action("radarr", 1, "Radarr", "movie:1", "missing", "Local", cover_url=local_cover)
+    store.record_search_action("radarr", 1, "Radarr", "movie:2", "missing", "Remote", cover_url=remote_cover)
+
+    assert store.clear_local_search_action_cover_urls() == 1
+    rows = store.get_recent_search_actions("radarr", 1, limit=2)
+    by_key = {row["item_key"]: row for row in rows}
+    assert by_key["movie:1"]["cover_url"] == ""
+    assert by_key["movie:2"]["cover_url"] == remote_cover
+
+
 def test_ui_instance_settings_roundtrip_upgrade_scope(tmp_path) -> None:
     store = StateStore(str(tmp_path / "seekarr.db"))
 
@@ -47,6 +128,34 @@ def test_ui_instance_settings_roundtrip_upgrade_scope(tmp_path) -> None:
     assert values["instance_name"] == "Radarr Main"
     assert values["upgrade_scope"] == "both"
     assert values["quiet_hours_enabled"] == 0
+
+
+def test_ui_app_settings_roundtrip_history_limit(tmp_path) -> None:
+    store = StateStore(str(tmp_path / "seekarr.db"))
+
+    assert store.get_ui_app_settings() == {}
+
+    store.set_ui_app_settings(history_limit=123)
+    assert store.get_ui_app_settings()["history_limit"] == 123
+
+    store.set_ui_app_settings(history_limit=1)
+    assert store.get_ui_app_settings()["history_limit"] == 30
+
+    store.set_ui_app_settings(history_limit=999999)
+    assert store.get_ui_app_settings()["history_limit"] == 5000
+
+
+def test_search_action_history_prunes_to_history_limit(tmp_path) -> None:
+    store = StateStore(str(tmp_path / "seekarr.db"))
+    store.set_ui_app_settings(history_limit=30)
+
+    for idx in range(35):
+        store.record_search_action("radarr", 1, "Radarr", f"movie:{idx}", "missing", f"Movie {idx}")
+
+    rows = store.get_recent_search_actions("radarr", 1, limit=100)
+    assert len(rows) == 30
+    assert rows[0]["title"] == "Movie 34"
+    assert rows[-1]["title"] == "Movie 5"
 
 
 def test_ui_instance_settings_migrates_upgrade_scope_column(tmp_path) -> None:
@@ -86,6 +195,31 @@ def test_ui_instance_settings_migrates_upgrade_scope_column(tmp_path) -> None:
     assert "instance_name" in cols
     assert "upgrade_scope" in cols
     assert "quiet_hours_enabled" in cols
+
+
+def test_search_action_migrates_media_columns(tmp_path) -> None:
+    db_path = tmp_path / "seekarr.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE search_action (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hunt_type TEXT NOT NULL,
+                instance_id INTEGER NOT NULL,
+                instance_name TEXT,
+                item_key TEXT,
+                action_kind TEXT,
+                title TEXT NOT NULL,
+                occurred_at TEXT NOT NULL
+            )
+            """
+        )
+
+    store = StateStore(str(db_path))
+    with store._connect() as conn:
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(search_action)")}
+    assert "item_url" in cols
+    assert "cover_url" in cols
 
 
 def test_delete_instance_removes_instance_state_and_credentials(tmp_path) -> None:

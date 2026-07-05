@@ -161,8 +161,8 @@
 
             <div class="settings-global-section settings-global-preferences">
               <div class="settings-global-preferences-copy">
-                <h4>Global Preferences</h4>
-                <div class="subline">Shared settings used across every configured instance.</div>
+                <h4>Display & Time</h4>
+                <div class="subline">Date, clock, and sleep-window timezone preferences.</div>
               </div>
               <div class="settings-global-preferences-grid">
                 <div class="field settings-global-field">
@@ -188,7 +188,66 @@
                 </div>
               </div>
               <div class="subline settings-global-help">
-                Used for sleep window start/end evaluation. Leave empty to use the server timezone.
+                Sleep windows use the selected timezone.
+              </div>
+            </div>
+
+            <div class="settings-global-section settings-global-preferences">
+              <div class="settings-global-preferences-copy">
+                <h4>History</h4>
+                <div class="subline">Controls how much search history is available per instance.</div>
+              </div>
+              <div class="settings-global-preferences-grid">
+                <div class="field settings-global-field settings-global-field-wide">
+                  <div class="settings-slider-card">
+                    <div class="settings-slider-label-row">
+                      <div>
+                        <div class="label">History Per Instance</div>
+                        <div class="subline">Stored and shown per Radarr/Sonarr instance.</div>
+                      </div>
+                      <div class="mono settings-slider-value"><span id="settings-history-limit-value">240</span> entries</div>
+                    </div>
+                    <input id="settings-history-limit" name="seekarr_history_limit" class="cfg settings-range" type="range" min="30" max="5000" step="1" value="240"/>
+                    <div class="settings-range-scale mono">
+                      <span>Min 30</span>
+                      <span>Max 5,000</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="subline settings-global-help">
+                Keep and show this many recent searches for each Radarr or Sonarr instance. Minimum 30.
+              </div>
+            </div>
+
+            <div class="settings-global-section settings-global-preferences">
+              <div class="settings-global-preferences-copy">
+                <h4>Image Cache</h4>
+                <div class="subline">Local poster cache used by search history and recent actions.</div>
+              </div>
+              <div class="settings-global-preferences-grid">
+                <div class="field settings-global-field">
+                  <div class="label">Image Cache</div>
+                  <label class="settings-switch">
+                    <input id="settings-cache-images" name="seekarr_cache_images" type="checkbox">
+                    <span class="settings-switch-slider" aria-hidden="true"></span>
+                    <span class="settings-switch-label">Enabled</span>
+                  </label>
+                </div>
+                <div class="field settings-global-field">
+                  <div class="label">Cache Retention (days)</div>
+                  <input id="settings-image-cache-retention-days" name="seekarr_image_cache_retention_days" class="cfg mono" type="number" min="1" max="3650" value="30"/>
+                </div>
+                <div class="field settings-global-field settings-global-field-wide">
+                  <div class="label">Cached Images</div>
+                  <div class="settings-cache-actions">
+                    <div class="subline mono" id="settings-media-cache-stats">0 files / 0 B</div>
+                    <button class="btn-mini btn-mini-cache-clear" id="clear-media-cache" type="button">Clear Cache</button>
+                  </div>
+                </div>
+              </div>
+              <div class="subline settings-global-help">
+                Cached images are stored beside the database and cleaned when they age out or are no longer referenced by search history.
               </div>
             </div>
           </div>

@@ -34,6 +34,18 @@
         }, 180);
       }, 2600);
     }
+    function fmtBytes(bytes) {
+      const n = Number(bytes || 0);
+      if (!Number.isFinite(n) || n <= 0) return '0 B';
+      const units = ['B', 'KB', 'MB', 'GB'];
+      let value = n;
+      let idx = 0;
+      while (value >= 1024 && idx < units.length - 1) {
+        value /= 1024;
+        idx += 1;
+      }
+      return `${value >= 10 || idx === 0 ? Math.round(value) : value.toFixed(1)} ${units[idx]}`;
+    }
     function syncSettingsSaveFab() {
       const fab = document.getElementById('settings-save-fab');
       const msg = document.getElementById('settings-msg');
@@ -51,14 +63,27 @@
     async function fetchRecentActionMeta(appType, instanceId, itemKey) {
       const cacheKey = `${String(appType)}:${String(instanceId)}:${String(itemKey || '')}`;
       if (recentItemMetaCache.has(cacheKey)) return recentItemMetaCache.get(cacheKey);
-      const resp = await apiFetch(
-        `/api/item_meta?app=${encodeURIComponent(String(appType))}&instance_id=${encodeURIComponent(String(instanceId))}&item_key=${encodeURIComponent(String(itemKey || ''))}`,
-        { cache: 'default' }
-      );
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(data.error || `meta ${resp.status}`);
-      recentItemMetaCache.set(cacheKey, data || {});
-      return data || {};
+      if (recentItemMetaInflight.has(cacheKey)) return recentItemMetaInflight.get(cacheKey);
+      const pending = (async () => {
+        const resp = await apiFetch(
+          `/api/item_meta?app=${encodeURIComponent(String(appType))}&instance_id=${encodeURIComponent(String(instanceId))}&item_key=${encodeURIComponent(String(itemKey || ''))}`,
+          { cache: 'default' }
+        );
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || `meta ${resp.status}`);
+        const coverUrl = String(data?.cover_url || '').trim();
+        const localImageCacheEnabled = statusData?.config?.app?.cache_images === true;
+        if (!localImageCacheEnabled || !coverUrl || coverUrl.startsWith('/media_cache/')) {
+          recentItemMetaCache.set(cacheKey, data || {});
+        }
+        return data || {};
+      })();
+      recentItemMetaInflight.set(cacheKey, pending);
+      try {
+        return await pending;
+      } finally {
+        recentItemMetaInflight.delete(cacheKey);
+      }
     }
     function renderActionMetaBadges(kindMeta, sourceLabel = '') {
       const chips = [];
@@ -67,27 +92,60 @@
       if (sourceLabel) chips.push(`<span class="recent-action-source">${safe(sourceLabel)}</span>`);
       return chips.join('');
     }
-    async function hydrateActionMediaRows(root = document) {
+    function settleActionCoverPaint(root = document) {
+      const scope = root || document;
+      const imgs = Array.from(scope.querySelectorAll('.recent-action-cover, .history-entry-cover'));
+      if (!imgs.length) return;
+      requestAnimationFrame(() => {
+        imgs.forEach((img) => {
+          if (img.complete && img.naturalWidth > 0) {
+            img.classList.add('is-loaded');
+          } else {
+            img.addEventListener('load', () => img.classList.add('is-loaded'), { once: true });
+          }
+        });
+      });
+    }
+    async function hydrateActionMediaRows(root = document, options = {}) {
       const scope = root || document;
       const rows = Array.from(scope.querySelectorAll(
         '.recent-action-row[data-app][data-instance-id][data-item-key], .history-entry[data-app][data-instance-id][data-item-key]'
       ));
-      await Promise.all(rows.map(async (row) => {
+      const localImageCacheEnabled = statusData?.config?.app?.cache_images === true;
+      const fetchMissing = options.fetchMissing !== false;
+      const hydrateRow = async (row) => {
         const appType = String(row.getAttribute('data-app') || '').trim();
         const instanceId = String(row.getAttribute('data-instance-id') || '').trim();
         const itemKey = String(row.getAttribute('data-item-key') || '').trim();
         if (!appType || !instanceId || !itemKey) return;
+        const button = row.querySelector('.recent-action-link, .history-entry-link');
+        const wrap = row.querySelector('.recent-action-cover-wrap, .history-entry-cover-wrap');
+        const existingItemUrl = String(button?.getAttribute('data-item-url') || '').trim();
+        const existingCoverUrl = String(row.getAttribute('data-cover-url') || '').trim();
+        if (wrap && existingCoverUrl) {
+          const imageClass = wrap.classList.contains('history-entry-cover-wrap')
+            ? 'history-entry-cover'
+            : 'recent-action-cover';
+          if (!wrap.querySelector('img')) {
+            wrap.innerHTML = `<img class="${imageClass}" src="${String(existingCoverUrl)}" alt="" loading="eager" fetchpriority="high" decoding="async">`;
+          }
+          wrap.classList.remove('is-empty');
+          row.classList.remove('no-cover');
+        }
+        const existingCoverIsLocal = existingCoverUrl.startsWith('/media_cache/');
+        if (existingItemUrl && existingCoverUrl && (!localImageCacheEnabled || existingCoverIsLocal)) return;
+        if (!fetchMissing) return;
         try {
           const meta = await fetchRecentActionMeta(appType, instanceId, itemKey);
-          const button = row.querySelector('.recent-action-link, .history-entry-link');
           if (button && meta.item_url) button.setAttribute('data-item-url', String(meta.item_url));
-          const wrap = row.querySelector('.recent-action-cover-wrap, .history-entry-cover-wrap');
+          if (meta.cover_url) row.setAttribute('data-cover-url', String(meta.cover_url));
           if (wrap && meta.cover_url) {
             const imageClass = wrap.classList.contains('history-entry-cover-wrap')
               ? 'history-entry-cover'
               : 'recent-action-cover';
-            wrap.innerHTML = `<img class="${imageClass}" src="${String(meta.cover_url)}" alt="">`;
+            wrap.innerHTML = `<img class="${imageClass}" src="${String(meta.cover_url)}" alt="" loading="eager" fetchpriority="high" decoding="async">`;
             wrap.classList.remove('is-empty');
+            row.classList.remove('no-cover');
           } else if (wrap) {
             row.classList.add('no-cover');
             wrap.classList.add('is-empty');
@@ -101,9 +159,18 @@
             wrap.innerHTML = '';
           }
         }
-      }));
+      };
+      const concurrency = 4;
+      for (let idx = 0; idx < rows.length; idx += concurrency) {
+        await Promise.all(rows.slice(idx, idx + concurrency).map(hydrateRow));
+      }
     }
-    async function openRecentActionItem(appType, instanceId, itemKey) {
+    async function openRecentActionItem(appType, instanceId, itemKey, existingUrl='') {
+      const directUrl = String(existingUrl || '').trim();
+      if (directUrl) {
+        window.open(directUrl, '_blank', 'noopener,noreferrer');
+        return;
+      }
       if (!appType || !instanceId || !itemKey) return;
       try {
         const data = await fetchRecentActionMeta(appType, instanceId, itemKey);
@@ -158,17 +225,28 @@
           date_format: normalizeDateFormat(document.getElementById('settings-date-format')?.value || 'iso'),
           time_format: normalizeTimeFormat(document.getElementById('settings-time-format')?.value || '24h'),
           quiet_hours_timezone: String(document.getElementById('settings-quiet-timezone')?.value || '').trim(),
+          history_limit: Number(document.getElementById('settings-history-limit')?.value || 240),
+          cache_images: !!document.getElementById('settings-cache-images')?.checked,
+          image_cache_retention_days: Number(document.getElementById('settings-image-cache-retention-days')?.value || 30),
         },
         instances,
       };
     }
     function settingsPayloadFingerprint(payload) {
       return JSON.stringify(payload || {
-        app: { quiet_hours_timezone: '', date_format: 'iso', time_format: '24h' },
+        app: {
+          quiet_hours_timezone: '',
+          date_format: 'iso',
+          time_format: '24h',
+          history_limit: 240,
+          cache_images: false,
+          image_cache_retention_days: 30,
+        },
         instances: [],
       });
     }
     function refreshSettingsDirtyState(message='') {
+      if (!settingsLoaded) return;
       const current = settingsPayloadFingerprint(buildSettingsPayload());
       setSettingsDirtyState(current !== settingsBaseline, message);
     }

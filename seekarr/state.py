@@ -13,7 +13,7 @@ def _utc_now() -> str:
 
 class StateStore:
     def __init__(self, db_path: str) -> None:
-        self.db_path = Path(db_path)
+        self.db_path = Path(db_path).expanduser().resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._fernet: Fernet | None = None
         self._init_db()
@@ -72,6 +72,9 @@ class StateStore:
                     instance_name TEXT,
                     item_key TEXT,
                     action_kind TEXT,
+                    item_url TEXT,
+                    cover_url TEXT,
+                    media_checked_at TEXT,
                     title TEXT NOT NULL,
                     occurred_at TEXT NOT NULL
                 );
@@ -111,6 +114,9 @@ class StateStore:
                     quiet_hours_timezone TEXT,
                     date_format TEXT,
                     time_format TEXT,
+                    cache_images INTEGER,
+                    image_cache_retention_days INTEGER,
+                    history_limit INTEGER,
                     updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS ui_instance_settings (
@@ -145,11 +151,23 @@ class StateStore:
                 conn.execute("ALTER TABLE ui_app_settings ADD COLUMN date_format TEXT")
             if "time_format" not in app_cols:
                 conn.execute("ALTER TABLE ui_app_settings ADD COLUMN time_format TEXT")
+            if "cache_images" not in app_cols:
+                conn.execute("ALTER TABLE ui_app_settings ADD COLUMN cache_images INTEGER")
+            if "image_cache_retention_days" not in app_cols:
+                conn.execute("ALTER TABLE ui_app_settings ADD COLUMN image_cache_retention_days INTEGER")
+            if "history_limit" not in app_cols:
+                conn.execute("ALTER TABLE ui_app_settings ADD COLUMN history_limit INTEGER")
             search_action_cols = {
                 str(row["name"]).strip().lower() for row in conn.execute("PRAGMA table_info(search_action)")
             }
             if "action_kind" not in search_action_cols:
                 conn.execute("ALTER TABLE search_action ADD COLUMN action_kind TEXT")
+            if "item_url" not in search_action_cols:
+                conn.execute("ALTER TABLE search_action ADD COLUMN item_url TEXT")
+            if "cover_url" not in search_action_cols:
+                conn.execute("ALTER TABLE search_action ADD COLUMN cover_url TEXT")
+            if "media_checked_at" not in search_action_cols:
+                conn.execute("ALTER TABLE search_action ADD COLUMN media_checked_at TEXT")
             cols = {str(row["name"]).strip().lower() for row in conn.execute("PRAGMA table_info(ui_instance_settings)")}
             if "instance_name" not in cols:
                 conn.execute("ALTER TABLE ui_instance_settings ADD COLUMN instance_name TEXT")
@@ -279,7 +297,11 @@ class StateStore:
     def get_ui_app_settings(self) -> dict[str, Any]:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT quiet_hours_timezone, date_format, time_format FROM ui_app_settings WHERE id = 1"
+                """
+                SELECT quiet_hours_timezone, date_format, time_format, cache_images, image_cache_retention_days, history_limit
+                FROM ui_app_settings
+                WHERE id = 1
+                """
             ).fetchone()
         if not row:
             return {}
@@ -287,6 +309,9 @@ class StateStore:
             "quiet_hours_timezone": (str(row["quiet_hours_timezone"]).strip() if row["quiet_hours_timezone"] else ""),
             "date_format": (str(row["date_format"]).strip() if row["date_format"] else ""),
             "time_format": (str(row["time_format"]).strip() if row["time_format"] else ""),
+            "cache_images": False if row["cache_images"] is None else bool(row["cache_images"]),
+            "image_cache_retention_days": int(row["image_cache_retention_days"] or 30),
+            "history_limit": max(30, min(5000, int(row["history_limit"] or 240))),
         }
 
     def set_ui_app_settings(
@@ -294,22 +319,34 @@ class StateStore:
         quiet_hours_timezone: str | None = None,
         date_format: str | None = None,
         time_format: str | None = None,
+        cache_images: bool | None = False,
+        image_cache_retention_days: int | None = 30,
+        history_limit: int | None = 240,
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO ui_app_settings(id, quiet_hours_timezone, date_format, time_format, updated_at)
-                VALUES(1, ?, ?, ?, ?)
+                INSERT INTO ui_app_settings(
+                    id, quiet_hours_timezone, date_format, time_format,
+                    cache_images, image_cache_retention_days, history_limit, updated_at
+                )
+                VALUES(1, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     quiet_hours_timezone=excluded.quiet_hours_timezone,
                     date_format=excluded.date_format,
                     time_format=excluded.time_format,
+                    cache_images=excluded.cache_images,
+                    image_cache_retention_days=excluded.image_cache_retention_days,
+                    history_limit=excluded.history_limit,
                     updated_at=excluded.updated_at
                 """,
                 (
                     str(quiet_hours_timezone or "").strip(),
                     str(date_format or "").strip(),
                     str(time_format or "").strip(),
+                    1 if cache_images is not False else 0,
+                    max(1, min(3650, int(image_cache_retention_days or 30))),
+                    max(30, min(5000, int(history_limit or 240))),
                     _utc_now(),
                 ),
             )
@@ -434,6 +471,51 @@ class StateStore:
             )
             return cur.rowcount
 
+    def prune_search_action_history(
+        self,
+        limit: int | None = None,
+        hunt_type: str | None = None,
+        instance_id: int | None = None,
+    ) -> int:
+        keep = max(30, min(5000, int(limit or self.get_ui_app_settings().get("history_limit") or 240)))
+        removed = 0
+        with self._connect() as conn:
+            if hunt_type and instance_id is not None:
+                groups = [{"hunt_type": str(hunt_type), "instance_id": int(instance_id)}]
+            else:
+                groups = conn.execute(
+                    """
+                    SELECT hunt_type, instance_id
+                    FROM search_action
+                    GROUP BY hunt_type, instance_id
+                    """
+                ).fetchall()
+            for row in groups:
+                cur = conn.execute(
+                    """
+                    DELETE FROM search_action
+                    WHERE hunt_type = ?
+                      AND instance_id = ?
+                      AND id NOT IN (
+                        SELECT id
+                        FROM search_action
+                        WHERE hunt_type = ?
+                          AND instance_id = ?
+                        ORDER BY id DESC
+                        LIMIT ?
+                      )
+                    """,
+                    (
+                        row["hunt_type"],
+                        int(row["instance_id"]),
+                        row["hunt_type"],
+                        int(row["instance_id"]),
+                        keep,
+                    ),
+                )
+                removed += max(0, int(cur.rowcount or 0))
+        return removed
+
     def item_on_cooldown(self, hunt_type: str, instance_id: int, item_key: str, retry_hours: int) -> bool:
         with self._connect() as conn:
             row = conn.execute(
@@ -510,12 +592,17 @@ class StateStore:
         item_key: str,
         action_kind: str,
         title: str,
+        item_url: str = "",
+        cover_url: str = "",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO search_action(hunt_type, instance_id, instance_name, item_key, action_kind, title, occurred_at)
-                VALUES(?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO search_action(
+                    hunt_type, instance_id, instance_name, item_key, action_kind,
+                    item_url, cover_url, media_checked_at, title, occurred_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(hunt_type),
@@ -523,16 +610,117 @@ class StateStore:
                     str(instance_name or ""),
                     str(item_key or ""),
                     str(action_kind or "").strip(),
+                    str(item_url or "").strip(),
+                    str(cover_url or "").strip(),
+                    _utc_now() if (str(item_url or "").strip() or str(cover_url or "").strip()) else "",
                     str(title or ""),
                     _utc_now(),
                 ),
             )
+        self.prune_search_action_history(hunt_type=hunt_type, instance_id=instance_id)
+
+    def set_search_action_media(
+        self,
+        hunt_type: str,
+        instance_id: int,
+        item_key: str,
+        item_url: str = "",
+        cover_url: str = "",
+    ) -> None:
+        if not str(item_key or "").strip():
+            return
+        item_url_value = str(item_url or "").strip()
+        cover_url_value = str(cover_url or "").strip()
+        if not item_url_value and not cover_url_value:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE search_action
+                SET
+                    item_url = CASE WHEN ? != '' THEN ? ELSE COALESCE(item_url, '') END,
+                    cover_url = CASE WHEN ? != '' THEN ? ELSE COALESCE(cover_url, '') END,
+                    media_checked_at = ?
+                WHERE hunt_type = ? AND instance_id = ? AND item_key = ?
+                """,
+                (
+                    item_url_value,
+                    item_url_value,
+                    cover_url_value,
+                    cover_url_value,
+                    _utc_now(),
+                    str(hunt_type),
+                    int(instance_id),
+                    str(item_key),
+                ),
+            )
+
+    def mark_search_action_media_checked(self, hunt_type: str, instance_id: int, item_key: str) -> None:
+        if not str(item_key or "").strip():
+            return
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE search_action
+                SET media_checked_at = ?
+                WHERE hunt_type = ? AND instance_id = ? AND item_key = ?
+                """,
+                (_utc_now(), str(hunt_type), int(instance_id), str(item_key)),
+            )
+
+    def get_search_actions_needing_media_backfill(
+        self,
+        *,
+        limit: int = 50,
+        retry_before_iso: str = "",
+    ) -> list[dict[str, Any]]:
+        retry_before = str(retry_before_iso or "").strip()
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    id, hunt_type, instance_id, instance_name, item_key, action_kind,
+                    item_url, cover_url, media_checked_at, title, occurred_at
+                FROM search_action
+                WHERE COALESCE(item_key, '') != ''
+                  AND (
+                    COALESCE(media_checked_at, '') = ''
+                    OR (? != '' AND media_checked_at < ?)
+                  )
+                  AND (
+                    COALESCE(item_url, '') = ''
+                    OR COALESCE(cover_url, '') = ''
+                    OR cover_url LIKE 'http://%'
+                    OR cover_url LIKE 'https://%'
+                  )
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (retry_before, retry_before, max(1, int(limit))),
+            ).fetchall()
+        return [
+            {
+                "id": int(r["id"]),
+                "app_type": r["hunt_type"],
+                "instance_id": int(r["instance_id"]),
+                "instance_name": r["instance_name"],
+                "item_key": r["item_key"],
+                "action_kind": r["action_kind"],
+                "item_url": r["item_url"] or "",
+                "cover_url": r["cover_url"] or "",
+                "media_checked_at": r["media_checked_at"] or "",
+                "title": r["title"],
+                "occurred_at": r["occurred_at"],
+            }
+            for r in rows
+        ]
 
     def get_recent_search_actions(self, hunt_type: str, instance_id: int, limit: int = 50) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, hunt_type, instance_id, instance_name, item_key, action_kind, title, occurred_at
+                SELECT
+                    id, hunt_type, instance_id, instance_name, item_key, action_kind, item_url, cover_url, title, occurred_at
                 FROM search_action
                 WHERE hunt_type = ? AND instance_id = ?
                 ORDER BY id DESC
@@ -548,6 +736,8 @@ class StateStore:
                 "instance_name": r["instance_name"],
                 "item_key": r["item_key"],
                 "action_kind": r["action_kind"],
+                "item_url": r["item_url"] or "",
+                "cover_url": r["cover_url"] or "",
                 "title": r["title"],
                 "occurred_at": r["occurred_at"],
             }
@@ -565,6 +755,8 @@ class StateStore:
                     COALESCE(NULLIF(ui.instance_name, ''), NULLIF(sa.instance_name, ''), '') AS instance_name,
                     sa.item_key,
                     sa.action_kind,
+                    sa.item_url,
+                    sa.cover_url,
                     sa.title,
                     sa.occurred_at
                 FROM search_action sa
@@ -583,6 +775,8 @@ class StateStore:
                 "instance_name": r["instance_name"],
                 "item_key": r["item_key"],
                 "action_kind": r["action_kind"],
+                "item_url": r["item_url"] or "",
+                "cover_url": r["cover_url"] or "",
                 "title": r["title"],
                 "occurred_at": r["occurred_at"],
             }
@@ -612,6 +806,28 @@ class StateStore:
                 (str(hunt_type), int(instance_id), str(item_key)),
             ).fetchone()
         return int(row["c"] or 0) if row else 0
+
+    def get_referenced_cover_urls(self) -> set[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT cover_url
+                FROM search_action
+                WHERE cover_url IS NOT NULL AND cover_url != ''
+                """
+            ).fetchall()
+        return {str(row["cover_url"] or "").strip() for row in rows if str(row["cover_url"] or "").strip()}
+
+    def clear_local_search_action_cover_urls(self) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE search_action
+                SET cover_url = '', media_checked_at = ''
+                WHERE cover_url LIKE '/media_cache/%'
+                """
+            )
+            return int(cur.rowcount or 0)
 
     def set_scheduler_heartbeat(self) -> None:
         now = _utc_now()

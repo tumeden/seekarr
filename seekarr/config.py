@@ -18,6 +18,8 @@ class AppConfig:
     request_timeout_seconds: int
     verify_ssl: bool
     log_level: str
+    cache_images: bool = False
+    image_cache_retention_days: int = 30
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,8 @@ def load_app_config(db_path: str | None = None) -> AppConfig:
         request_timeout_seconds=30,
         verify_ssl=True,
         log_level="INFO",
+        cache_images=False,
+        image_cache_retention_days=30,
     )
 
 

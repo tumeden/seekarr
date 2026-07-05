@@ -12,10 +12,14 @@
     let statusData = null;
     let settingsBaseline = '';
     let settingsDirty = false;
+    let settingsLoaded = false;
     let settingsStatusMessage = '';
     let deleteInstanceTarget = null;
     let toastSeq = 0;
+    let lastHistoryRenderKey = '';
+    let lastRecentActionsRenderKey = '';
     const recentItemMetaCache = new Map();
+    const recentItemMetaInflight = new Map();
     const authStorageKey = 'seekarr_auth_header';
     const timezoneFallback = [
       'UTC', 'Etc/UTC',

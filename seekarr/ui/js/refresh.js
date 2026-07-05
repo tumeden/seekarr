@@ -172,9 +172,27 @@
             instance_name: a.instance_name,
             item_key: a.item_key,
             action_kind: a.action_kind,
+            item_url: a.item_url,
+            cover_url: a.cover_url,
             title: a.title,
           }))
         : (Array.isArray(rs.recent_actions) ? rs.recent_actions : []);
+      const recentActionsRenderKey = JSON.stringify(actions.slice(0, 12).map(a => [
+        a.ts || '',
+        a.app_type || '',
+        a.instance_id || '',
+        a.instance_name || '',
+        a.item_key || '',
+        a.action_kind || '',
+        a.item_url || '',
+        a.cover_url || '',
+        a.title || '',
+      ]));
+      if (recentActionsRenderKey === lastRecentActionsRenderKey && actionsEl.innerHTML) {
+        tickCountdowns();
+        return;
+      }
+      lastRecentActionsRenderKey = recentActionsRenderKey;
       if (!actions.length) {
         actionsEl.innerHTML = '<div class="recent-actions-empty">No recent searches recorded yet.</div>';
       } else {
@@ -184,20 +202,28 @@
           const currentInstanceName = instanceNameMap.get(`${appType}:${instanceId}`) || String(a.instance_name || '').trim();
           const sourceLabel = currentInstanceName ? `${appLabel(appType)} / ${currentInstanceName}` : appLabel(appType);
           const kindMeta = actionKindMeta(a.action_kind, a.item_key);
-          const itemOpenArgs = `${JSON.stringify(appType)}, ${JSON.stringify(String(instanceId))}, ${JSON.stringify(String(a.item_key || ''))}`;
+          const itemUrl = String(a.item_url || '').trim();
+          const coverUrl = String(a.cover_url || '').trim();
+          const itemOpenArgs = `${JSON.stringify(appType)}, ${JSON.stringify(String(instanceId))}, ${JSON.stringify(String(a.item_key || ''))}, ${JSON.stringify(itemUrl)}`;
           const rowClass = a.item_key ? 'recent-action-row' : 'recent-action-row no-cover';
+          const coverWrapClass = (a.item_key && coverUrl) ? '' : ' is-empty';
+          const coverHtml = coverUrl
+            ? `<img class="recent-action-cover" src="${safe(coverUrl)}" alt="" loading="eager" fetchpriority="high" decoding="async">`
+            : '';
+          const buttonAttrs = itemUrl ? ` data-item-url="${safe(itemUrl)}"` : '';
           return `
-            <div class="${rowClass}" data-app="${safe(appType)}" data-instance-id="${safe(String(instanceId))}" data-item-key="${safe(String(a.item_key || ''))}">
-              <div class="recent-action-cover-wrap${a.item_key ? '' : ' is-empty'}"></div>
+            <div class="${rowClass}" data-app="${safe(appType)}" data-instance-id="${safe(String(instanceId))}" data-item-key="${safe(String(a.item_key || ''))}" data-cover-url="${safe(coverUrl)}">
+              <div class="recent-action-cover-wrap${coverWrapClass}">${coverHtml}</div>
               <div class="recent-action-time mono" title="${safe(fmtTime(a.ts) || '')}">${safe(fmtRecentActionStamp(a.ts) || '--')}</div>
               <div class="recent-action-main">
-                <button class="recent-action-title recent-action-link" type="button" onclick='openRecentActionItem(${itemOpenArgs}); return false;'>${safe(a.title || 'Untitled search')}</button>
+                <button class="recent-action-title recent-action-link" type="button"${buttonAttrs} onclick='openRecentActionItem(${itemOpenArgs}); return false;'>${safe(a.title || 'Untitled search')}</button>
                 <div class="recent-action-meta">${renderActionMetaBadges(kindMeta, sourceLabel)}</div>
               </div>
             </div>
           `;
         }).join('');
       }
+      settleActionCoverPaint(actionsEl);
       hydrateActionMediaRows(actionsEl);
       tickCountdowns();
     }

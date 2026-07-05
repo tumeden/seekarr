@@ -12,6 +12,7 @@ from .arr import (
     ArrClient,
 )
 from .config import ArrConfig, ArrSyncInstanceConfig, RuntimeConfig
+from .item_meta import cache_cover_image, prune_media_cache, resolve_movie_item_meta, resolve_series_item_meta
 from .state import StateStore
 
 RECENT_PRIORITY_WINDOW_DAYS = 2
@@ -210,6 +211,72 @@ class Engine:
     def _mark_action(self) -> None:
         with self._pacer_lock:
             self._last_action_at = time.monotonic()
+
+    def _resolve_search_action_media(
+        self,
+        app_type: str,
+        client: ArrClient,
+        *,
+        instance_id: int,
+        item_key: str,
+        movie_id: int = 0,
+        series_id: int = 0,
+    ) -> dict[str, str]:
+        base_url = str(getattr(client.config, "url", "") or "").strip().rstrip("/")
+        api_key = str(getattr(client.config, "api_key", "") or "").strip()
+        if not base_url or not api_key:
+            return {"cover_url": "", "item_url": ""}
+        try:
+            if app_type == "radarr" and int(movie_id or 0) > 0:
+                meta = resolve_movie_item_meta(
+                    base_url=base_url,
+                    api_key=api_key,
+                    timeout_seconds=max(5, int(client.timeout_seconds or 30)),
+                    verify_ssl=bool(client.verify_ssl),
+                    movie_id=int(movie_id),
+                )
+            elif app_type == "sonarr" and int(series_id or 0) > 0:
+                meta = resolve_series_item_meta(
+                    base_url=base_url,
+                    api_key=api_key,
+                    timeout_seconds=max(5, int(client.timeout_seconds or 30)),
+                    verify_ssl=bool(client.verify_ssl),
+                    series_id=int(series_id),
+                )
+            else:
+                return {"cover_url": "", "item_url": ""}
+            if bool(getattr(self.config.app, "cache_images", False)) and meta.get("cover_url"):
+                meta["cover_url"] = cache_cover_image(
+                    self.config.app.db_path,
+                    meta.get("cover_url", ""),
+                    app_type=app_type,
+                    instance_id=int(instance_id),
+                    item_key=str(item_key),
+                    timeout_seconds=max(5, int(client.timeout_seconds or 30)),
+                    verify_ssl=bool(client.verify_ssl),
+                    base_url=base_url,
+                    api_key=api_key,
+                )
+            return meta
+        except Exception:
+            self.logger.debug(
+                "Unable to resolve action media for %s (movie_id=%s, series_id=%s)",
+                app_type,
+                movie_id,
+                series_id,
+                exc_info=True,
+            )
+        return {"cover_url": "", "item_url": ""}
+
+    def _prune_media_cache(self) -> None:
+        try:
+            prune_media_cache(
+                self.config.app.db_path,
+                self.store.get_referenced_cover_urls(),
+                int(getattr(self.config.app, "image_cache_retention_days", 30) or 30),
+            )
+        except Exception:
+            self.logger.debug("Unable to prune media cache", exc_info=True)
 
     def _is_recent_release(self, app_type: str, release_iso: Any, now: datetime | None = None) -> bool:
         if app_type not in ("radarr", "sonarr"):
@@ -1257,6 +1324,14 @@ class Engine:
             title = f"{wanted_item.series_title} S{wanted_item.season_number:02d}E{wanted_item.episode_number:02d}"
 
         if success:
+            media = self._resolve_search_action_media(
+                app_type,
+                client,
+                instance_id=instance.instance_id,
+                item_key=item_key,
+                movie_id=int(getattr(wanted_item, "movie_id", 0) or 0),
+                series_id=int(getattr(wanted_item, "series_id", 0) or 0),
+            )
             self._mark_action()
             stats.actions_triggered += 1
             triggered_items.add(item_key)
@@ -1269,7 +1344,10 @@ class Engine:
                 item_key=item_key,
                 action_kind=str(getattr(wanted_item, "wanted_kind", "missing") or "missing"),
                 title=title,
+                item_url=media.get("item_url", ""),
+                cover_url=media.get("cover_url", ""),
             )
+            self._prune_media_cache()
             self.logger.info("Triggered %s search: %s (%s)", app_type, title, instance.instance_name)
             if progress_cb:
                 progress_cb(
@@ -1391,6 +1469,9 @@ class Engine:
         success = client.trigger_season_search(series_id, season_number)
         title = f"{series_title} Season {int(season_number):02d} (Pack)"
         if success:
+            media = self._resolve_search_action_media(
+                "sonarr", client, instance_id=instance.instance_id, item_key=item_key, series_id=int(series_id)
+            )
             self._mark_action()
             stats.actions_triggered += 1
             triggered_items.add(item_key)
@@ -1403,7 +1484,10 @@ class Engine:
                 item_key=item_key,
                 action_kind="missing",
                 title=title,
+                item_url=media.get("item_url", ""),
+                cover_url=media.get("cover_url", ""),
             )
+            self._prune_media_cache()
             self.logger.info("Triggered sonarr season search: %s (%s)", title, instance.instance_name)
             if progress_cb:
                 progress_cb(
@@ -1525,6 +1609,9 @@ class Engine:
         success = client.trigger_episode_search_bulk(episode_ids)
         title = f"{series_title} ({len(episode_ids)} eps) (Show Batch)"
         if success:
+            media = self._resolve_search_action_media(
+                "sonarr", client, instance_id=instance.instance_id, item_key=item_key, series_id=int(series_id)
+            )
             self._mark_action()
             stats.actions_triggered += 1
             triggered_items.add(item_key)
@@ -1537,7 +1624,10 @@ class Engine:
                 item_key=item_key,
                 action_kind="missing",
                 title=title,
+                item_url=media.get("item_url", ""),
+                cover_url=media.get("cover_url", ""),
             )
+            self._prune_media_cache()
             self.logger.info("Triggered sonarr show batch search: %s (%s)", title, instance.instance_name)
             if progress_cb:
                 progress_cb(

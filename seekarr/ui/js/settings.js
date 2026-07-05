@@ -425,7 +425,20 @@
       refreshSettingsDirtyState();
     }
 
+    function syncHistoryLimitLabel() {
+      const input = document.getElementById('settings-history-limit');
+      const label = document.getElementById('settings-history-limit-value');
+      if (!input) return;
+      const value = Number(input.value || 240);
+      if (label) label.textContent = String(value);
+      const min = Number(input.min || 30);
+      const max = Number(input.max || 5000);
+      const fill = max > min ? ((value - min) / (max - min)) * 100 : 0;
+      input.style.setProperty('--range-fill', `${Math.max(0, Math.min(100, fill))}%`);
+    }
+
     async function loadSettings() {
+      settingsLoaded = false;
       populateTimezoneOptions();
       const r = await apiFetch('/api/settings', { cache:'no-store' });
       const data = await r.json();
@@ -433,10 +446,45 @@
       document.getElementById('settings-quiet-timezone').value = String(appCfg.quiet_hours_timezone || '').trim();
       document.getElementById('settings-date-format').value = normalizeDateFormat(appCfg.date_format);
       document.getElementById('settings-time-format').value = normalizeTimeFormat(appCfg.time_format);
+      document.getElementById('settings-history-limit').value = String(Number(appCfg.history_limit || 240));
+      syncHistoryLimitLabel();
+      document.getElementById('settings-cache-images').checked = appCfg.cache_images === true;
+      document.getElementById('settings-image-cache-retention-days').value = String(Number(appCfg.image_cache_retention_days || 30));
+      const cacheStats = appCfg.media_cache || {};
+      const cacheStatsEl = document.getElementById('settings-media-cache-stats');
+      if (cacheStatsEl) {
+        cacheStatsEl.textContent = `${Number(cacheStats.files || 0)} files / ${fmtBytes(cacheStats.bytes || 0)}`;
+      }
       applySettingsNavigationTarget(data.instances || []);
       renderSettingsCards(data.instances || []);
       settingsBaseline = settingsPayloadFingerprint(buildSettingsPayload());
+      settingsLoaded = true;
       setSettingsDirtyState(false, '');
+    }
+
+    async function clearMediaCache() {
+      const btn = document.getElementById('clear-media-cache');
+      const statsEl = document.getElementById('settings-media-cache-stats');
+      if (!btn) return;
+      btn.disabled = true;
+      const oldText = btn.textContent;
+      btn.textContent = 'Clearing...';
+      try {
+        const r = await apiFetch('/api/media_cache/clear', { method: 'POST' });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.ok) throw new Error(data.error || 'Failed to clear image cache');
+        const stats = data.media_cache || {};
+        if (statsEl) {
+          statsEl.textContent = `${Number(stats.files || 0)} files / ${fmtBytes(stats.bytes || 0)}`;
+        }
+        showToast('Image Cache Cleared', `Removed ${Number(data.files_removed || 0)} files. Backfill will repopulate cached posters in the background.`);
+        if (typeof refresh === 'function') await refresh();
+      } catch (err) {
+        showToast('Clear Failed', err?.message || 'Failed to clear image cache', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = oldText || 'Clear Cache';
+      }
     }
 
     async function saveSettings() {
@@ -447,6 +495,12 @@
       syncSettingsSaveFab();
 
       try {
+        if (!settingsLoaded) {
+          await loadSettings();
+          msg.textContent = 'Settings loaded. Review changes and save again.';
+          settingsStatusMessage = msg.textContent;
+          return;
+        }
         const payload = buildSettingsPayload();
         const instances = payload.instances;
         const invalidInstance = instances.find(inst => !inst.instance_name);

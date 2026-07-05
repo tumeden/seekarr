@@ -17,12 +17,18 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-import requests
 from flask import Flask, jsonify, request, send_file
 
 from .arr import ArrClient, ArrRequestError
 from .config import ArrConfig, ArrSyncInstanceConfig, RuntimeConfig, load_runtime_config
 from .engine import Engine, _quiet_hours_end_utc
+from .item_meta import (
+    cache_cover_image,
+    media_cache_dir,
+    media_cache_stats,
+    prune_media_cache,
+    resolve_item_meta_by_key,
+)
 from .state import StateStore
 from .utils.logging import setup_logging
 
@@ -80,6 +86,13 @@ def _normalize_time_format(value: Any) -> str:
     if fmt in ("12h", "12", "12hr", "12-hour"):
         return "12h"
     return "24h"
+
+
+def _normalize_history_limit(value: Any) -> int:
+    try:
+        return max(30, min(5000, int(value or 240)))
+    except (TypeError, ValueError):
+        return 240
 
 
 def _contains_control_chars(value: str) -> bool:
@@ -211,6 +224,10 @@ def _config_view(config: RuntimeConfig, store: StateStore) -> dict[str, Any]:
             "quiet_hours_timezone": str(getattr(config.app, "quiet_hours_timezone", "") or ""),
             "date_format": _normalize_date_format(app_overrides.get("date_format")),
             "time_format": _normalize_time_format(app_overrides.get("time_format")),
+            "cache_images": bool(getattr(config.app, "cache_images", False)),
+            "image_cache_retention_days": int(getattr(config.app, "image_cache_retention_days", 30) or 30),
+            "history_limit": _normalize_history_limit(app_overrides.get("history_limit")),
+            "media_cache": media_cache_stats(config.app.db_path),
         },
         "instances": rows,
     }
@@ -260,7 +277,10 @@ def _is_newer_version(current: str, latest: str) -> bool:
 
 def create_app(db_path: str | None = None) -> Flask:
     project_dir = Path(__file__).resolve().parent.parent
-    base_config = load_runtime_config(db_path)
+    resolved_db_path = db_path
+    if resolved_db_path and not Path(resolved_db_path).is_absolute():
+        resolved_db_path = str(project_dir / resolved_db_path)
+    base_config = load_runtime_config(resolved_db_path)
     setup_logging(base_config.app.log_level)
     logger = logging.getLogger("seekarr.webui")
     wz = logging.getLogger("werkzeug")
@@ -344,7 +364,12 @@ def create_app(db_path: str | None = None) -> Flask:
     def _with_ui_overrides(cfg: RuntimeConfig) -> RuntimeConfig:
         app_overrides = store.get_ui_app_settings()
         qtz = str(app_overrides.get("quiet_hours_timezone") or "").strip()
-        app_cfg = replace(cfg.app, quiet_hours_timezone=qtz or cfg.app.quiet_hours_timezone)
+        app_cfg = replace(
+            cfg.app,
+            quiet_hours_timezone=qtz or cfg.app.quiet_hours_timezone,
+            cache_images=bool(app_overrides.get("cache_images", False)),
+            image_cache_retention_days=max(1, min(3650, int(app_overrides.get("image_cache_retention_days") or 30))),
+        )
 
         raw_overrides = store.get_all_ui_instance_settings()
         radarr_instances = [
@@ -380,6 +405,15 @@ def create_app(db_path: str | None = None) -> Flask:
         "active_instance_id": None,
         "active_instance_name": None,
     }
+
+    def _prune_media_cache_for_config(cfg: RuntimeConfig, force_unreferenced: bool = False) -> dict[str, int]:
+        return prune_media_cache(
+            cfg.app.db_path,
+            store.get_referenced_cover_urls(),
+            int(getattr(cfg.app, "image_cache_retention_days", 30) or 30),
+            force_unreferenced=force_unreferenced,
+        )
+
     current_version = "dev"
     try:
         with open(project_dir / "version.txt", "r", encoding="utf-8") as f:
@@ -399,7 +433,6 @@ def create_app(db_path: str | None = None) -> Flask:
         "update_available": False,
         "checked_at_epoch": 0.0,
     }
-    asset_cache_key = current_version
 
     def _refresh_version_state() -> None:
         now = time.time()
@@ -463,6 +496,19 @@ def create_app(db_path: str | None = None) -> Flask:
             return bundled
         fallback = project_dir / name
         return fallback
+
+    def _asset_cache_key() -> str:
+        digest = hashlib.sha256(str(current_version).encode("utf-8"))
+        for name in sorted(ui_asset_names):
+            path = _ui_path(name)
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            digest.update(name.encode("utf-8"))
+            digest.update(str(int(stat.st_mtime_ns)).encode("ascii"))
+            digest.update(str(int(stat.st_size)).encode("ascii"))
+        return digest.hexdigest()[:16]
 
     password_hash = store.get_webui_password_hash()
 
@@ -611,6 +657,9 @@ def create_app(db_path: str | None = None) -> Flask:
 
     item_meta_cache: dict[tuple[str, int, str], tuple[float, dict[str, str]]] = {}
     item_meta_cache_lock = threading.Lock()
+    media_backfill_lock = threading.Lock()
+    media_backfill_last_started = 0.0
+    media_backfill_loop_started = False
 
     def _find_instance(cfg: RuntimeConfig, app_type: str, instance_id: int) -> ArrSyncInstanceConfig | None:
         pool = cfg.radarr_instances if app_type == "radarr" else cfg.sonarr_instances if app_type == "sonarr" else []
@@ -636,125 +685,182 @@ def create_app(db_path: str | None = None) -> Flask:
             bool(cfg.app.verify_ssl),
         )
 
-    def _arr_json_request(
-        base_url: str, api_key: str, timeout_seconds: int, verify_ssl: bool, path: str
-    ) -> dict[str, Any] | list[Any] | None:
-        try:
-            resp = requests.get(
-                f"{base_url}{path}",
-                headers={"X-Api-Key": api_key},
-                timeout=timeout_seconds,
-                verify=verify_ssl,
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except (requests.RequestException, ValueError):
-            return None
+    def _local_media_exists(cfg: RuntimeConfig, cover_url: str) -> bool:
+        value = str(cover_url or "").strip()
+        if not value.startswith("/media_cache/"):
+            return True
+        name = value.rsplit("/", 1)[-1]
+        if not re.fullmatch(r"[a-f0-9]{64}\.(jpg|png|webp|gif)", name):
+            return False
+        return (media_cache_dir(cfg.app.db_path) / name).is_file()
 
-    def _pick_cover_url(base_url: str, payload: dict[str, Any]) -> str | None:
-        direct = str(payload.get("remotePoster") or "").strip()
-        if direct:
-            return direct
-        images = payload.get("images") if isinstance(payload.get("images"), list) else []
-        poster: dict[str, Any] | None = None
-        for row in images:
-            if not isinstance(row, dict):
-                continue
-            if str(row.get("coverType") or "").strip().lower() == "poster":
-                poster = row
-                break
-        if poster is None:
-            for row in images:
-                if isinstance(row, dict) and (row.get("url") or row.get("remoteUrl")):
-                    poster = row
-                    break
-        if poster is None:
-            return None
-        for key in ("remoteUrl", "url"):
-            value = str(poster.get(key) or "").strip()
-            if value:
-                if value.startswith("http://") or value.startswith("https://"):
-                    return value
-                return f"{base_url}{value if value.startswith('/') else '/' + value}"
-        return None
+    def _should_local_cache_cover(cfg: RuntimeConfig, cover_url: str) -> bool:
+        value = str(cover_url or "").strip()
+        return bool(getattr(cfg.app, "cache_images", False)) and bool(value) and not value.startswith("/media_cache/")
 
-    def _resolve_item_resource(
-        cfg: RuntimeConfig, app_type: str, instance_id: int, item_key: str
-    ) -> tuple[str, dict[str, Any], str | None] | None:
-        conn = _resolve_arr_connection(cfg, app_type, instance_id)
-        if conn is None:
-            return None
-        base_url, api_key, timeout_seconds, verify_ssl = conn
-        key = str(item_key or "").strip().lower()
-        payload: dict[str, Any] | None = None
-        item_url: str | None = None
-        if app_type == "radarr" and key.startswith("movie:"):
-            try:
-                movie_id = int(key.split(":", 1)[1] or 0)
-            except (TypeError, ValueError):
-                return None
-            if movie_id <= 0:
-                return None
-            raw = _arr_json_request(base_url, api_key, timeout_seconds, verify_ssl, f"/api/v3/movie/{movie_id}")
-            payload = raw if isinstance(raw, dict) else None
-            if payload:
-                title_slug = str(payload.get("titleSlug") or "").strip()
-                item_url = f"{base_url}/movie/{title_slug}" if title_slug else f"{base_url}/movie/{movie_id}"
-        elif app_type == "sonarr":
-            if key.startswith("series:") or key.startswith("season:"):
-                parts = key.split(":")
-                if len(parts) < 2:
-                    return None
-                try:
-                    series_id = int(parts[1] or 0)
-                except (TypeError, ValueError):
-                    return None
-            elif key.startswith("episode:"):
-                try:
-                    episode_id = int(key.split(":", 1)[1] or 0)
-                except (TypeError, ValueError):
-                    return None
-                if episode_id <= 0:
-                    return None
-                episode_raw = _arr_json_request(
-                    base_url, api_key, timeout_seconds, verify_ssl, f"/api/v3/episode/{episode_id}"
-                )
-                episode = episode_raw if isinstance(episode_raw, dict) else None
-                series_id = int((episode or {}).get("seriesId") or 0)
-            else:
-                return None
-            if series_id <= 0:
-                return None
-            raw = _arr_json_request(base_url, api_key, timeout_seconds, verify_ssl, f"/api/v3/series/{series_id}")
-            payload = raw if isinstance(raw, dict) else None
-            if payload:
-                title_slug = str(payload.get("titleSlug") or "").strip()
-                item_url = f"{base_url}/series/{title_slug}" if title_slug else f"{base_url}/series/{series_id}"
-        if not payload:
-            return None
-        return base_url, payload, item_url
+    def _cache_meta_cover(
+        cfg: RuntimeConfig,
+        *,
+        app_type: str,
+        instance_id: int,
+        item_key: str,
+        meta: dict[str, str],
+        base_url: str,
+        api_key: str,
+        timeout_seconds: int,
+        verify_ssl: bool,
+    ) -> dict[str, str]:
+        if not _should_local_cache_cover(cfg, meta.get("cover_url", "")):
+            return meta
+        cached = dict(meta)
+        cached["cover_url"] = cache_cover_image(
+            cfg.app.db_path,
+            cached.get("cover_url", ""),
+            app_type=app_type,
+            instance_id=instance_id,
+            item_key=item_key,
+            timeout_seconds=timeout_seconds,
+            verify_ssl=verify_ssl,
+            base_url=base_url,
+            api_key=api_key,
+        )
+        return cached
+
+    def _persist_item_meta(app_type: str, instance_id: int, item_key: str, meta: dict[str, str]) -> None:
+        if not meta.get("item_url") and not meta.get("cover_url"):
+            return
+        store.set_search_action_media(
+            hunt_type=app_type,
+            instance_id=instance_id,
+            item_key=item_key,
+            item_url=meta.get("item_url", ""),
+            cover_url=meta.get("cover_url", ""),
+        )
+
+    def _scrub_missing_local_media(cfg: RuntimeConfig, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        out = []
+        for row in rows:
+            current = dict(row)
+            cover_url = str(current.get("cover_url") or "").strip()
+            if cover_url and not _local_media_exists(cfg, cover_url):
+                current["cover_url"] = ""
+            out.append(current)
+        return out
 
     def _resolve_item_meta(cfg: RuntimeConfig, app_type: str, instance_id: int, item_key: str) -> dict[str, str]:
         cache_key = (str(app_type).strip().lower(), int(instance_id), str(item_key or "").strip())
         now = time.time()
+        conn = _resolve_arr_connection(cfg, app_type, instance_id)
         with item_meta_cache_lock:
             cached = item_meta_cache.get(cache_key)
             if cached and cached[0] > now:
-                return dict(cached[1])
-        resolved = _resolve_item_resource(cfg, app_type, instance_id, item_key)
-        if resolved is None:
+                meta = dict(cached[1])
+                if meta.get("cover_url") and not _local_media_exists(cfg, meta.get("cover_url", "")):
+                    item_meta_cache.pop(cache_key, None)
+                else:
+                    if conn is not None:
+                        base_url, api_key, timeout_seconds, verify_ssl = conn
+                        meta = _cache_meta_cover(
+                            cfg,
+                            app_type=app_type,
+                            instance_id=instance_id,
+                            item_key=item_key,
+                            meta=meta,
+                            base_url=base_url,
+                            api_key=api_key,
+                            timeout_seconds=timeout_seconds,
+                            verify_ssl=verify_ssl,
+                        )
+                        item_meta_cache[cache_key] = (cached[0], dict(meta))
+                    _persist_item_meta(app_type, instance_id, item_key, meta)
+                    return meta
+        if conn is None:
             empty = {"cover_url": "", "item_url": ""}
             with item_meta_cache_lock:
                 item_meta_cache[cache_key] = (now + 300, empty)
             return empty
-        base_url, payload, item_url = resolved
-        meta = {
-            "cover_url": _pick_cover_url(base_url, payload) or "",
-            "item_url": str(item_url or "").strip(),
-        }
+        base_url, api_key, timeout_seconds, verify_ssl = conn
+        meta = resolve_item_meta_by_key(base_url, api_key, timeout_seconds, verify_ssl, app_type, item_key)
+        meta = _cache_meta_cover(
+            cfg,
+            app_type=app_type,
+            instance_id=instance_id,
+            item_key=item_key,
+            meta=meta,
+            base_url=base_url,
+            api_key=api_key,
+            timeout_seconds=timeout_seconds,
+            verify_ssl=verify_ssl,
+        )
+        if meta.get("item_url") or meta.get("cover_url"):
+            _persist_item_meta(app_type, instance_id, item_key, meta)
+            _prune_media_cache_for_config(cfg)
         with item_meta_cache_lock:
-            item_meta_cache[cache_key] = (now + 1800, meta)
+            ttl = 1800 if (meta.get("item_url") or meta.get("cover_url")) else 300
+            item_meta_cache[cache_key] = (now + ttl, meta)
         return dict(meta)
+
+    def _run_search_action_media_backfill(reason: str, batch_limit: int = 25) -> None:
+        if not media_backfill_lock.acquire(blocking=False):
+            return
+        try:
+            cfg = _get_config()
+            retry_before = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+            rows = store.get_search_actions_needing_media_backfill(limit=batch_limit, retry_before_iso=retry_before)
+            if not rows:
+                return
+            logger.info("Backfilling search action media for %s rows (%s)", len(rows), reason)
+            for row in rows:
+                app_type = str(row.get("app_type") or "").strip().lower()
+                item_key = str(row.get("item_key") or "").strip()
+                try:
+                    instance_id = int(row.get("instance_id") or 0)
+                except (TypeError, ValueError):
+                    instance_id = 0
+                if app_type not in ("radarr", "sonarr") or instance_id <= 0 or not item_key:
+                    continue
+                try:
+                    meta = _resolve_item_meta(cfg, app_type, instance_id, item_key)
+                    if not meta.get("item_url") and not meta.get("cover_url"):
+                        store.mark_search_action_media_checked(app_type, instance_id, item_key)
+                except Exception:
+                    logger.debug(
+                        "Unable to backfill search action media for %s:%s %s",
+                        app_type,
+                        instance_id,
+                        item_key,
+                        exc_info=True,
+                    )
+                    store.mark_search_action_media_checked(app_type, instance_id, item_key)
+                time.sleep(0.15)
+        finally:
+            media_backfill_lock.release()
+
+    def _schedule_search_action_media_backfill(reason: str, min_interval_seconds: float = 300.0) -> None:
+        nonlocal media_backfill_last_started
+        now = time.monotonic()
+        if (now - media_backfill_last_started) < min_interval_seconds:
+            return
+        media_backfill_last_started = now
+        threading.Thread(
+            target=_run_search_action_media_backfill,
+            args=(reason,),
+            name="webui-media-backfill",
+            daemon=True,
+        ).start()
+
+    def _ensure_media_backfill_loop() -> None:
+        nonlocal media_backfill_loop_started
+        if media_backfill_loop_started:
+            return
+        media_backfill_loop_started = True
+
+        def loop() -> None:
+            while True:
+                time.sleep(15 * 60)
+                _schedule_search_action_media_backfill("periodic", min_interval_seconds=0.0)
+
+        threading.Thread(target=loop, name="webui-media-backfill-loop", daemon=True).start()
 
     def _reload_config() -> None:
         nonlocal config
@@ -764,6 +870,7 @@ def create_app(db_path: str | None = None) -> Flask:
             config = new_config
             engine.config = new_config
         _ensure_autorun_threads(new_config)
+        _schedule_search_action_media_backfill("config reload", min_interval_seconds=600.0)
 
     def _progress_cb(evt: dict[str, Any]) -> None:
         with run_state_lock:
@@ -849,7 +956,7 @@ def create_app(db_path: str | None = None) -> Flask:
         t.start()
         return True
 
-    def _sleep_until(iso: str | None, max_seconds: float = 300.0) -> None:
+    def _sleep_until(iso: str | None, max_seconds: float = 300.0, heartbeat_seconds: float = 30.0) -> None:
         if not iso:
             time.sleep(1.0)
             return
@@ -860,9 +967,13 @@ def create_app(db_path: str | None = None) -> Flask:
             return
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
-        seconds = max(0.0, (dt.astimezone(timezone.utc) - now).total_seconds())
-        time.sleep(min(seconds, max_seconds))
+        while True:
+            now = datetime.now(timezone.utc)
+            seconds = max(0.0, (dt.astimezone(timezone.utc) - now).total_seconds())
+            if seconds <= 0:
+                return
+            store.set_scheduler_heartbeat()
+            time.sleep(min(seconds, max_seconds, heartbeat_seconds))
 
     def _instance_sleep_window_enabled(inst: ArrSyncInstanceConfig) -> bool:
         value = getattr(inst, "quiet_hours_enabled", None)
@@ -944,13 +1055,19 @@ def create_app(db_path: str | None = None) -> Flask:
                 ).start()
 
     _ensure_autorun_threads(config)
+    _ensure_media_backfill_loop()
+    _schedule_search_action_media_backfill("startup", min_interval_seconds=0.0)
 
     @app.get("/")
-    def index() -> str:
+    def index() -> Any:
         template = _ui_path("index.html")
         if not template.exists():
             return "Web UI file not found", 500
-        return template.read_text(encoding="utf-8").replace("__ASSET_CACHE_KEY__", asset_cache_key)
+        html = template.read_text(encoding="utf-8").replace("__ASSET_CACHE_KEY__", _asset_cache_key())
+        response = app.response_class(html, mimetype="text/html")
+        response.cache_control.no_cache = True
+        response.cache_control.max_age = 0
+        return response
 
     @app.get("/api/status")
     def status() -> Any:
@@ -979,15 +1096,17 @@ def create_app(db_path: str | None = None) -> Flask:
         for inst in config.sonarr_instances:
             instance_last_run[f"sonarr:{inst.instance_id}"] = store.get_last_instance_run("sonarr", inst.instance_id)
 
-        history_limit = 240
+        history_limit = _normalize_history_limit(store.get_ui_app_settings().get("history_limit"))
         search_history: dict[str, Any] = {}
         for inst in cfg.radarr_instances:
-            search_history[f"radarr:{inst.instance_id}"] = store.get_recent_search_actions(
-                "radarr", inst.instance_id, history_limit
+            search_history[f"radarr:{inst.instance_id}"] = _scrub_missing_local_media(
+                cfg,
+                store.get_recent_search_actions("radarr", inst.instance_id, history_limit),
             )
         for inst in cfg.sonarr_instances:
-            search_history[f"sonarr:{inst.instance_id}"] = store.get_recent_search_actions(
-                "sonarr", inst.instance_id, history_limit
+            search_history[f"sonarr:{inst.instance_id}"] = _scrub_missing_local_media(
+                cfg,
+                store.get_recent_search_actions("sonarr", inst.instance_id, history_limit),
             )
 
         return jsonify(
@@ -997,7 +1116,7 @@ def create_app(db_path: str | None = None) -> Flask:
                 "config": _config_view(cfg, store),
                 "sync_status": store.get_sync_statuses(),
                 "recent_runs": store.get_recent_runs(20),
-                "recent_actions": store.get_recent_search_actions_global(50),
+                "recent_actions": _scrub_missing_local_media(cfg, store.get_recent_search_actions_global(50)),
                 "rate_status": rate_status,
                 "instance_last_run": instance_last_run,
                 "search_history": search_history,
@@ -1023,7 +1142,12 @@ def create_app(db_path: str | None = None) -> Flask:
                 quiet_hours_timezone=str(app_in.get("quiet_hours_timezone") or "").strip(),
                 date_format=_normalize_date_format(app_in.get("date_format")),
                 time_format=_normalize_time_format(app_in.get("time_format")),
+                cache_images=bool(app_in.get("cache_images", False)),
+                image_cache_retention_days=max(1, min(3650, int(app_in.get("image_cache_retention_days") or 30))),
+                history_limit=_normalize_history_limit(app_in.get("history_limit")),
             )
+            store.prune_search_action_history(_normalize_history_limit(app_in.get("history_limit")))
+            _prune_media_cache_for_config(_get_config(), force_unreferenced=True)
             seen_keys: set[tuple[str, int]] = set()
 
             for row in inst_in:
@@ -1078,9 +1202,39 @@ def create_app(db_path: str | None = None) -> Flask:
                     store.set_arr_api_key(app_name, iid, api_key)
 
             _reload_config()
+            _prune_media_cache_for_config(_get_config())
             return jsonify({"ok": True})
         except Exception as exc:
             return jsonify({"error": str(exc)}), 400
+
+    @app.post("/api/media_cache/clear")
+    def clear_media_cache() -> Any:
+        cfg = _get_config()
+        root = media_cache_dir(cfg.app.db_path)
+        files_removed = 0
+        bytes_removed = 0
+        if root.exists():
+            for path in root.iterdir():
+                if not path.is_file():
+                    continue
+                try:
+                    stat = path.stat()
+                    path.unlink()
+                    files_removed += 1
+                    bytes_removed += int(stat.st_size)
+                except OSError:
+                    continue
+        rows_updated = store.clear_local_search_action_cover_urls()
+        _schedule_search_action_media_backfill("cache clear", min_interval_seconds=0.0)
+        return jsonify(
+            {
+                "ok": True,
+                "files_removed": files_removed,
+                "bytes_removed": bytes_removed,
+                "rows_updated": rows_updated,
+                "media_cache": media_cache_stats(cfg.app.db_path),
+            }
+        )
 
     @app.post("/api/run")
     def run_now() -> Any:
@@ -1146,6 +1300,27 @@ def create_app(db_path: str | None = None) -> Flask:
         if icon.exists():
             return send_file(icon, mimetype="image/svg+xml")
         return "", 204
+
+    @app.get("/media_cache/<path:filename>")
+    def media_cache_file(filename: str) -> Any:
+        name = str(filename or "").strip()
+        if not re.fullmatch(r"[a-f0-9]{64}\.(jpg|png|webp|gif)", name):
+            return jsonify({"error": "Media not found"}), 404
+        media_file = media_cache_dir(_get_config().app.db_path) / name
+        if not media_file.exists() or not media_file.is_file():
+            return jsonify({"error": "Media not found"}), 404
+        mimetype = {
+            ".jpg": "image/jpeg",
+            ".png": "image/png",
+            ".webp": "image/webp",
+            ".gif": "image/gif",
+        }.get(media_file.suffix.lower(), "application/octet-stream")
+        try:
+            return send_file(media_file, mimetype=mimetype, max_age=7 * 86400, conditional=True, etag=True)
+        except FileNotFoundError:
+            return jsonify({"error": "Media not found"}), 404
+        except OSError:
+            return jsonify({"error": "Media not found"}), 404
 
     @app.get("/assets/banner.svg")
     def asset_banner() -> Any:

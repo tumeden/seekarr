@@ -172,13 +172,26 @@
     ensureAuth();
 
 	    document.getElementById('save-settings').addEventListener('click', saveSettings);
+    document.getElementById('clear-media-cache')?.addEventListener('click', clearMediaCache);
     document.getElementById('section-settings').addEventListener('input', (e) => {
       const target = e.target;
       if (!target || !(target instanceof HTMLElement)) return;
+      if (target.id === 'settings-history-limit') {
+        const min = Number(target.getAttribute('min') || 30);
+        const max = Number(target.getAttribute('max') || 5000);
+        const value = Number(target.value || 240);
+        const label = document.getElementById('settings-history-limit-value');
+        if (label) label.textContent = String(value);
+        const fill = max > min ? ((value - min) / (max - min)) * 100 : 0;
+        target.style.setProperty('--range-fill', `${Math.max(0, Math.min(100, fill))}%`);
+      }
       if (
         target.id === 'settings-date-format' ||
         target.id === 'settings-time-format' ||
         target.id === 'settings-quiet-timezone' ||
+        target.id === 'settings-history-limit' ||
+        target.id === 'settings-cache-images' ||
+        target.id === 'settings-image-cache-retention-days' ||
         target.closest('#settings-instance-cards')
       ) {
         refreshSettingsDirtyState();
@@ -194,6 +207,9 @@
         target.id === 'settings-date-format' ||
         target.id === 'settings-time-format' ||
         target.id === 'settings-quiet-timezone' ||
+        target.id === 'settings-history-limit' ||
+        target.id === 'settings-cache-images' ||
+        target.id === 'settings-image-cache-retention-days' ||
         target.closest('#settings-instance-cards')
       ) {
         refreshSettingsDirtyState();

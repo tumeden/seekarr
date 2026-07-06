@@ -175,6 +175,9 @@ class CycleStats:
     actions_skipped_cooldown: int = 0
     actions_skipped_rate_limit: int = 0
     actions_skipped_not_released: int = 0
+    cleanup_candidates: int = 0
+    cleanup_actions_triggered: int = 0
+    cleanup_actions_dry_run: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -185,6 +188,9 @@ class CycleStats:
             "actions_skipped_cooldown": self.actions_skipped_cooldown,
             "actions_skipped_rate_limit": self.actions_skipped_rate_limit,
             "actions_skipped_not_released": self.actions_skipped_not_released,
+            "cleanup_candidates": self.cleanup_candidates,
+            "cleanup_actions_triggered": self.cleanup_actions_triggered,
+            "cleanup_actions_dry_run": self.cleanup_actions_dry_run,
         }
 
 
@@ -211,6 +217,138 @@ class Engine:
     def _mark_action(self) -> None:
         with self._pacer_lock:
             self._last_action_at = time.monotonic()
+
+    def _queue_item_title(self, row: dict[str, Any]) -> str:
+        title = str(row.get("title") or "").strip()
+        if title:
+            return title
+        movie = row.get("movie") if isinstance(row.get("movie"), dict) else {}
+        if movie.get("title"):
+            return str(movie.get("title") or "").strip()
+        series = row.get("series") if isinstance(row.get("series"), dict) else {}
+        episode = row.get("episode") if isinstance(row.get("episode"), dict) else {}
+        series_title = str(series.get("title") or row.get("seriesTitle") or "").strip()
+        if series_title:
+            season = int(row.get("seasonNumber") or episode.get("seasonNumber") or 0)
+            episode_num = int(row.get("episodeNumber") or episode.get("episodeNumber") or 0)
+            if season or episode_num:
+                return f"{series_title} S{season:02d}E{episode_num:02d}"
+            return series_title
+        return "Unknown download"
+
+    def _queue_item_key(self, app_type: str, row: dict[str, Any]) -> str:
+        queue_id = int(row.get("id") or 0)
+        if app_type == "radarr":
+            movie_id = int(row.get("movieId") or 0)
+            movie = row.get("movie") if isinstance(row.get("movie"), dict) else {}
+            movie_id = movie_id or int(movie.get("id") or 0)
+            return f"movie:{movie_id}" if movie_id > 0 else f"queue:{queue_id}"
+        episode_id = int(row.get("episodeId") or 0)
+        episode = row.get("episode") if isinstance(row.get("episode"), dict) else {}
+        episode_id = episode_id or int(episode.get("id") or 0)
+        return f"episode:{episode_id}" if episode_id > 0 else f"queue:{queue_id}"
+
+    def _queue_item_has_issue(self, row: dict[str, Any]) -> bool:
+        status = str(row.get("status") or "").strip().lower()
+        tracked = str(row.get("trackedDownloadStatus") or "").strip().lower()
+        state = str(row.get("trackedDownloadState") or "").strip().lower()
+        if status in {"warning", "error", "failed", "delaydownloadclient"}:
+            return True
+        if tracked in {"warning", "error"}:
+            return True
+        if state in {"failed", "importblocked"}:
+            return True
+        messages = row.get("statusMessages")
+        return isinstance(messages, list) and len(messages) > 0
+
+    def _queue_item_is_old_enough(self, row: dict[str, Any], threshold_hours: int) -> bool:
+        added = _parse_arr_datetime_utc(row.get("added"))
+        if not added:
+            return False
+        age = datetime.now(timezone.utc) - added
+        return age >= timedelta(hours=max(1, int(threshold_hours)))
+
+    def _queue_item_is_stalled_active(self, row: dict[str, Any]) -> bool:
+        status = str(row.get("status") or "").strip().lower()
+        if status not in {"downloading", "queued", "downloadclientunavailable", "delaydownloadclient"}:
+            return False
+        timeleft = str(row.get("timeleft") or "").strip().lower()
+        estimated = str(row.get("estimatedCompletionTime") or "").strip()
+        progress = row.get("progress")
+        try:
+            progress_value = float(progress)
+        except (TypeError, ValueError):
+            progress_value = None
+        return (
+            (not timeleft or timeleft in {"unknown", "00:00:00"})
+            and not estimated
+            and (progress_value is None or progress_value < 100)
+        )
+
+    def _cleanup_queue(
+        self,
+        app_type: str,
+        instance: ArrSyncInstanceConfig,
+        client: ArrClient,
+        stats: CycleStats,
+    ) -> None:
+        if not bool(getattr(instance, "cleanup_enabled", False)):
+            return
+        rows = client.fetch_queue()
+        if not rows:
+            return
+        dry_run = bool(getattr(instance, "cleanup_dry_run", False))
+        require_issue = bool(getattr(instance, "cleanup_require_issue", True))
+        threshold_hours = max(1, int(getattr(instance, "cleanup_stuck_hours", 24) or 24))
+        remove_from_client = bool(getattr(instance, "cleanup_remove_from_client", True))
+        blocklist = bool(getattr(instance, "cleanup_blocklist", True))
+        skip_redownload = bool(getattr(instance, "cleanup_skip_redownload", False))
+
+        for row in rows:
+            queue_id = int(row.get("id") or 0)
+            if queue_id <= 0:
+                continue
+            has_issue = self._queue_item_has_issue(row)
+            old_enough = self._queue_item_is_old_enough(row, threshold_hours)
+            should_clean = (
+                (has_issue and old_enough)
+                if require_issue
+                else (old_enough and (has_issue or self._queue_item_is_stalled_active(row)))
+            )
+            if not should_clean:
+                continue
+            stats.cleanup_candidates += 1
+            title = self._queue_item_title(row)
+            action_kind = "cleanup_dry_run" if dry_run else "cleanup"
+            if dry_run:
+                stats.cleanup_actions_dry_run += 1
+                success = True
+            else:
+                success = client.remove_queue_item(
+                    queue_id,
+                    remove_from_client=remove_from_client,
+                    blocklist=blocklist,
+                    skip_redownload=skip_redownload,
+                )
+            if not success:
+                continue
+            if not dry_run:
+                stats.cleanup_actions_triggered += 1
+            self.store.record_search_action(
+                hunt_type=app_type,
+                instance_id=instance.instance_id,
+                instance_name=instance.instance_name,
+                item_key=self._queue_item_key(app_type, row),
+                action_kind=action_kind,
+                title=title,
+            )
+            self.logger.info(
+                "%s cleanup %s: %s (%s)",
+                app_type.capitalize(),
+                "dry-run candidate" if dry_run else "removed queue item",
+                title,
+                instance.instance_name,
+            )
 
     def _resolve_search_action_media(
         self,
@@ -473,6 +611,8 @@ class Engine:
                     self.store.set_next_sync_time(app_type, instance.instance_id, quiet_end_utc.isoformat())
                     status = "quiet_hours"
                     return
+
+            self._cleanup_queue(app_type, instance, client, stats)
 
             wanted = (
                 client.fetch_wanted_movies(

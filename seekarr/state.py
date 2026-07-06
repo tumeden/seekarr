@@ -140,6 +140,13 @@ class StateStore:
                     item_retry_hours INTEGER,
                     rate_window_minutes INTEGER,
                     rate_cap INTEGER,
+                    cleanup_enabled INTEGER,
+                    cleanup_dry_run INTEGER,
+                    cleanup_stuck_hours INTEGER,
+                    cleanup_require_issue INTEGER,
+                    cleanup_remove_from_client INTEGER,
+                    cleanup_blocklist INTEGER,
+                    cleanup_skip_redownload INTEGER,
                     arr_url TEXT,
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY (app_type, instance_id)
@@ -175,6 +182,17 @@ class StateStore:
                 conn.execute("ALTER TABLE ui_instance_settings ADD COLUMN upgrade_scope TEXT")
             if "quiet_hours_enabled" not in cols:
                 conn.execute("ALTER TABLE ui_instance_settings ADD COLUMN quiet_hours_enabled INTEGER")
+            for col in (
+                "cleanup_enabled",
+                "cleanup_dry_run",
+                "cleanup_stuck_hours",
+                "cleanup_require_issue",
+                "cleanup_remove_from_client",
+                "cleanup_blocklist",
+                "cleanup_skip_redownload",
+            ):
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE ui_instance_settings ADD COLUMN {col} INTEGER")
 
     def get_webui_password_hash(self) -> str | None:
         with self._connect() as conn:
@@ -365,9 +383,12 @@ class StateStore:
                     quiet_hours_start, quiet_hours_end,
                     min_hours_after_release, min_seconds_between_actions,
                     max_missing_actions_per_instance_per_sync, max_cutoff_actions_per_instance_per_sync,
-                    sonarr_missing_mode, item_retry_hours, rate_window_minutes, rate_cap, arr_url, updated_at
+                    sonarr_missing_mode, item_retry_hours, rate_window_minutes, rate_cap,
+                    cleanup_enabled, cleanup_dry_run, cleanup_stuck_hours, cleanup_require_issue,
+                    cleanup_remove_from_client, cleanup_blocklist, cleanup_skip_redownload,
+                    arr_url, updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(app_type, instance_id) DO UPDATE SET
                     instance_name=excluded.instance_name,
                     enabled=excluded.enabled,
@@ -387,6 +408,13 @@ class StateStore:
                     item_retry_hours=excluded.item_retry_hours,
                     rate_window_minutes=excluded.rate_window_minutes,
                     rate_cap=excluded.rate_cap,
+                    cleanup_enabled=excluded.cleanup_enabled,
+                    cleanup_dry_run=excluded.cleanup_dry_run,
+                    cleanup_stuck_hours=excluded.cleanup_stuck_hours,
+                    cleanup_require_issue=excluded.cleanup_require_issue,
+                    cleanup_remove_from_client=excluded.cleanup_remove_from_client,
+                    cleanup_blocklist=excluded.cleanup_blocklist,
+                    cleanup_skip_redownload=excluded.cleanup_skip_redownload,
                     arr_url=excluded.arr_url,
                     updated_at=excluded.updated_at
                 """,
@@ -411,6 +439,13 @@ class StateStore:
                     values.get("item_retry_hours"),
                     values.get("rate_window_minutes"),
                     values.get("rate_cap"),
+                    values.get("cleanup_enabled"),
+                    values.get("cleanup_dry_run"),
+                    values.get("cleanup_stuck_hours"),
+                    values.get("cleanup_require_issue"),
+                    values.get("cleanup_remove_from_client"),
+                    values.get("cleanup_blocklist"),
+                    values.get("cleanup_skip_redownload"),
                     values.get("arr_url"),
                     _utc_now(),
                 ),
@@ -428,7 +463,10 @@ class StateStore:
                     quiet_hours_start, quiet_hours_end,
                     min_hours_after_release, min_seconds_between_actions,
                     max_missing_actions_per_instance_per_sync, max_cutoff_actions_per_instance_per_sync,
-                    sonarr_missing_mode, item_retry_hours, rate_window_minutes, rate_cap, arr_url
+                    sonarr_missing_mode, item_retry_hours, rate_window_minutes, rate_cap,
+                    cleanup_enabled, cleanup_dry_run, cleanup_stuck_hours, cleanup_require_issue,
+                    cleanup_remove_from_client, cleanup_blocklist, cleanup_skip_redownload,
+                    arr_url
                 FROM ui_instance_settings
                 """
             ).fetchall()
@@ -458,6 +496,13 @@ class StateStore:
                 "item_retry_hours": row["item_retry_hours"],
                 "rate_window_minutes": row["rate_window_minutes"],
                 "rate_cap": row["rate_cap"],
+                "cleanup_enabled": row["cleanup_enabled"],
+                "cleanup_dry_run": row["cleanup_dry_run"],
+                "cleanup_stuck_hours": row["cleanup_stuck_hours"],
+                "cleanup_require_issue": row["cleanup_require_issue"],
+                "cleanup_remove_from_client": row["cleanup_remove_from_client"],
+                "cleanup_blocklist": row["cleanup_blocklist"],
+                "cleanup_skip_redownload": row["cleanup_skip_redownload"],
                 "arr_url": row["arr_url"],
             }
         return out

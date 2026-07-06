@@ -51,6 +51,13 @@ class ArrSyncInstanceConfig:
     rate_window_minutes: int | None
     rate_cap: int | None
     arr: ArrConfig
+    cleanup_enabled: bool = False
+    cleanup_dry_run: bool = False
+    cleanup_stuck_hours: int = 24
+    cleanup_require_issue: bool = True
+    cleanup_remove_from_client: bool = True
+    cleanup_blocklist: bool = True
+    cleanup_skip_redownload: bool = False
 
 
 @dataclass(frozen=True)

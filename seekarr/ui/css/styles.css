@@ -3920,6 +3920,22 @@ select.cfg:focus {
   margin-top: 0;
 }
 
+.settings-instance-settings .settings-cleanup-grid {
+  align-items: start;
+}
+
+.settings-instance-settings .settings-cleanup-field {
+  display: flex;
+  min-height: 104px;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: flex-start;
+}
+
+.settings-instance-settings .settings-cleanup-field .settings-toggle-chip {
+  width: 100%;
+}
+
 .settings-add-server-card {
   align-self: stretch;
 }

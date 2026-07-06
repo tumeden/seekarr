@@ -45,6 +45,13 @@ def test_settings_can_create_multiple_radarr_instances_from_empty_db(tmp_path: P
                 "item_retry_hours": 72,
                 "rate_window_minutes": 60,
                 "rate_cap": 25,
+                "cleanup_enabled": True,
+                "cleanup_dry_run": True,
+                "cleanup_stuck_hours": 36,
+                "cleanup_require_issue": True,
+                "cleanup_remove_from_client": True,
+                "cleanup_blocklist": True,
+                "cleanup_skip_redownload": False,
                 "arr_url": "http://radarr-a:7878",
                 "arr_api_key": "abc123",
             },
@@ -68,6 +75,13 @@ def test_settings_can_create_multiple_radarr_instances_from_empty_db(tmp_path: P
                 "item_retry_hours": 48,
                 "rate_window_minutes": 30,
                 "rate_cap": 10,
+                "cleanup_enabled": False,
+                "cleanup_dry_run": True,
+                "cleanup_stuck_hours": 12,
+                "cleanup_require_issue": False,
+                "cleanup_remove_from_client": True,
+                "cleanup_blocklist": True,
+                "cleanup_skip_redownload": True,
                 "arr_url": "http://radarr-b:7878",
                 "arr_api_key": "def456",
             },
@@ -91,6 +105,9 @@ def test_settings_can_create_multiple_radarr_instances_from_empty_db(tmp_path: P
         "http://radarr-b:7878",
     ]
     assert [row["quiet_hours_enabled"] for row in body["instances"]] == [True, False]
+    assert [row["cleanup_enabled"] for row in body["instances"]] == [True, False]
+    assert [row["cleanup_stuck_hours"] for row in body["instances"]] == [36, 12]
+    assert [row["cleanup_skip_redownload"] for row in body["instances"]] == [False, True]
 
 
 def test_settings_defaults_history_limit_to_240_for_new_db(tmp_path: Path) -> None:

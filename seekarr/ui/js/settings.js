@@ -38,6 +38,13 @@
         item_retry_hours: 72,
         rate_window_minutes: 60,
         rate_cap: 25,
+        cleanup_enabled: false,
+        cleanup_dry_run: false,
+        cleanup_stuck_hours: 24,
+        cleanup_require_issue: true,
+        cleanup_remove_from_client: true,
+        cleanup_blocklist: true,
+        cleanup_skip_redownload: false,
         arr_url: '',
         api_key_set: false,
       };
@@ -137,6 +144,12 @@
         const upgradeScope = (upgradeScopeRaw === 'all_monitored') ? 'both' : upgradeScopeRaw;
         const order = String(inst.search_order || 'smart').toLowerCase();
         const sleepEnabled = (inst.quiet_hours_enabled !== false);
+        const cleanupEnabled = inst.cleanup_enabled === true;
+        const cleanupDryRun = inst.cleanup_dry_run === true;
+        const cleanupRequireIssue = inst.cleanup_require_issue !== false;
+        const cleanupRemoveFromClient = inst.cleanup_remove_from_client !== false;
+        const cleanupBlocklist = inst.cleanup_blocklist !== false;
+        const cleanupAllowRetry = inst.cleanup_skip_redownload !== true;
         const modeUi = (inst.app === 'sonarr') ? `
               <div class="field field-stack-gap">
                 <div class="label">
@@ -252,6 +265,52 @@
               <div class="field">
                 <div class="label">Rate Cap</div>
                 <input class="cfg si_rate_cap" name="settings_${safe(key)}_rate_cap" type="number" min="1" value="${safe(inst.rate_cap)}"/>
+              </div>
+            </div>
+        `;
+        const cleanupUi = `
+            <div class="settings-grid-auto settings-grid-spaced settings-cleanup-grid">
+              <div class="field settings-cleanup-field">
+                <div class="label">
+                  Queue Cleanup
+                </div>
+                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_cleanup_enabled" name="settings_${safe(key)}_cleanup_enabled" ${cleanupEnabled ? 'checked' : ''}> Enabled <span class="info-icon" title="Applies to Arr-tracked queue items for this instance, even if Seekarr did not start them."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span></label>
+                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_cleanup_dry_run" name="settings_${safe(key)}_cleanup_dry_run" ${cleanupDryRun ? 'checked' : ''}> Dry Run <span class="info-icon" title="Records cleanup candidates in history without removing queue items."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span></label>
+              </div>
+              <div class="field">
+                <div class="label">
+                  Stuck After (hours)
+                  <span class="info-icon" title="Queue items must be at least this old before cleanup can act on them."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <input class="cfg si_cleanup_stuck_hours" name="settings_${safe(key)}_cleanup_stuck_hours" type="number" min="1" max="720" value="${safe(inst.cleanup_stuck_hours || 24)}"/>
+              </div>
+              <div class="field settings-cleanup-field">
+                <div class="label">
+                  Candidate Filter
+                  <span class="info-icon" title="Safer mode. When off, old active downloads with unknown ETA can also be cleaned."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_cleanup_require_issue" name="settings_${safe(key)}_cleanup_require_issue" ${cleanupRequireIssue ? 'checked' : ''}> Require Arr Warning/Error</label>
+              </div>
+              <div class="field settings-cleanup-field">
+                <div class="label">
+                  Client Action
+                  <span class="info-icon" title="Ask Sonarr/Radarr to remove the item from the download client configured in that Arr instance. Seekarr does not connect to the download client directly."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_cleanup_remove_client" name="settings_${safe(key)}_cleanup_remove_client" ${cleanupRemoveFromClient ? 'checked' : ''}> Remove From Download Client</label>
+              </div>
+              <div class="field settings-cleanup-field">
+                <div class="label">
+                  Arr Action
+                  <span class="info-icon" title="Blocklist/mark failed in Arr so it can choose a different release."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_cleanup_blocklist" name="settings_${safe(key)}_cleanup_blocklist" ${cleanupBlocklist ? 'checked' : ''}> Mark Failed</label>
+              </div>
+              <div class="field settings-cleanup-field">
+                <div class="label">
+                  Retry
+                  <span class="info-icon" title="When cleanup marks a queue item failed, Sonarr/Radarr may search for another release using its normal failed-download handling. Availability, quality rules, delays, and indexer results still apply."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_cleanup_allow_retry" name="settings_${safe(key)}_cleanup_allow_retry" ${cleanupAllowRetry ? 'checked' : ''}> Allow Arr Download Retry</label>
               </div>
             </div>
         `;
@@ -384,6 +443,14 @@
                   <div class="subline settings-panel-help">Control release delay, retries, and request pacing.</div>
                 </div>
                 <div class="settings-panel-body">${timingUi}</div>
+              </div>
+
+              <div class="settings-panel">
+                <div class="settings-panel-copy">
+                  <h4 class="settings-panel-title">Download Cleanup</h4>
+                  <div class="subline settings-panel-help">Clean old problem downloads from this Arr queue.</div>
+                </div>
+                <div class="settings-panel-body">${cleanupUi}</div>
               </div>
               </div>
             </div>

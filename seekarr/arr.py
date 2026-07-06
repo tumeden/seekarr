@@ -295,6 +295,35 @@ class ArrClient:
                 ids.add(episode_id)
         return ids
 
+    def fetch_queue(self) -> list[dict[str, Any]]:
+        try:
+            return self._fetch_paged_records("/api/v3/queue")
+        except ArrRequestError as exc:
+            self.logger.warning("%s queue fetch failed: %s", self.name.capitalize(), exc)
+            return []
+
+    def remove_queue_item(
+        self,
+        queue_id: int,
+        remove_from_client: bool = True,
+        blocklist: bool = True,
+        skip_redownload: bool = False,
+    ) -> bool:
+        try:
+            self._request(
+                "DELETE",
+                f"/api/v3/queue/{int(queue_id)}",
+                params={
+                    "removeFromClient": str(bool(remove_from_client)).lower(),
+                    "blocklist": str(bool(blocklist)).lower(),
+                    "skipRedownload": str(bool(skip_redownload)).lower(),
+                },
+            )
+            return True
+        except ArrRequestError as exc:
+            self.logger.warning("%s queue cleanup failed for %s: %s", self.name.capitalize(), queue_id, exc)
+            return False
+
     def _fetch_series_lookup(self) -> dict[int, tuple[str, int, bool]]:
         """Return {series_id: (title, tvdb_id, monitored)} for Sonarr mapping."""
         lookup: dict[int, tuple[str, int, bool]] = {}

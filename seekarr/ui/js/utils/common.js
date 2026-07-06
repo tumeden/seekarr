@@ -212,6 +212,13 @@
           item_retry_hours: Number(tr.querySelector('.si_retry')?.value || 0),
           rate_window_minutes: Number(tr.querySelector('.si_rate_window')?.value || 0),
           rate_cap: Number(tr.querySelector('.si_rate_cap')?.value || 0),
+          cleanup_enabled: !!tr.querySelector('.si_cleanup_enabled')?.checked,
+          cleanup_dry_run: !!tr.querySelector('.si_cleanup_dry_run')?.checked,
+          cleanup_stuck_hours: Number(tr.querySelector('.si_cleanup_stuck_hours')?.value || 24),
+          cleanup_require_issue: !!tr.querySelector('.si_cleanup_require_issue')?.checked,
+          cleanup_remove_from_client: !!tr.querySelector('.si_cleanup_remove_client')?.checked,
+          cleanup_blocklist: !!tr.querySelector('.si_cleanup_blocklist')?.checked,
+          cleanup_skip_redownload: !(tr.querySelector('.si_cleanup_allow_retry')?.checked ?? true),
           arr_url: String(tr.querySelector('.si_url')?.value || '').trim(),
           arr_api_key: String(tr.querySelector('.si_apikey')?.value || '').trim(),
         });
@@ -384,6 +391,12 @@
       }
       if (raw === 'missing') {
         return { label: 'Download', className: 'download', typeLabel };
+      }
+      if (raw === 'cleanup') {
+        return { label: 'Cleanup', className: 'upgrade', typeLabel };
+      }
+      if (raw === 'cleanup_dry_run') {
+        return { label: 'Cleanup Check', className: 'library', typeLabel };
       }
       return { label: '', className: '', typeLabel };
     }

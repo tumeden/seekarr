@@ -623,7 +623,11 @@ class Engine:
                     with monitor_state.lock:
                         deadline = float(monitor_state.deadline_at or 0.0)
                     remaining = deadline - time.monotonic() if deadline > 0 else SMART_SEASON_MONITOR_POLL_SECONDS
-                    sleep_for = SMART_SEASON_MONITOR_POLL_SECONDS if remaining <= 0 else min(SMART_SEASON_MONITOR_POLL_SECONDS, remaining)
+                    sleep_for = (
+                        SMART_SEASON_MONITOR_POLL_SECONDS
+                        if remaining <= 0
+                        else min(SMART_SEASON_MONITOR_POLL_SECONDS, remaining)
+                    )
                     monitor_state.stop_event.wait(max(0.0, sleep_for))
 
                 with monitor_state.lock:
@@ -639,11 +643,15 @@ class Engine:
 
                 for watch in burst_watches:
                     physical_download_count = len(watch.matched_identities)
-                    episode_like_count = len(watch.matched_episode_ids) if watch.matched_episode_ids else physical_download_count
+                    episode_like_count = (
+                        len(watch.matched_episode_ids) if watch.matched_episode_ids else physical_download_count
+                    )
                     if physical_download_count < SMART_SEASON_EPISODE_EXPLOSION_THRESHOLD:
                         continue
                     for episode_id in sorted(watch.matched_episode_ids):
-                        title_value = watch.matched_episode_titles.get(episode_id) or f"{watch.title} episode {episode_id}"
+                        title_value = (
+                            watch.matched_episode_titles.get(episode_id) or f"{watch.title} episode {episode_id}"
+                        )
                         self.store.mark_item_action(
                             "sonarr",
                             instance.instance_id,
@@ -1612,9 +1620,7 @@ class Engine:
 
                     if sonarr_missing_mode == "smart":
                         baseline_queue_ids = {
-                            ident
-                            for ident in (self._queue_row_identity(row) for row in client.fetch_queue())
-                            if ident
+                            ident for ident in (self._queue_row_identity(row) for row in client.fetch_queue()) if ident
                         }
                         self._start_smart_season_queue_monitor(
                             client=client,
@@ -1689,7 +1695,10 @@ class Engine:
                                             command_id=command_id,
                                             timeout_seconds=SMART_SEASON_MONITOR_TIMEOUT_SECONDS,
                                         )
-                                        if season_wait_result == "no_result" and not smart_season_monitor.brake_event.is_set():
+                                        if (
+                                            season_wait_result == "no_result"
+                                            and not smart_season_monitor.brake_event.is_set()
+                                        ):
                                             self.logger.info(
                                                 "Smart Sonarr season search produced no observed queue result; "
                                                 "continuing to the next search: %s Season %02d (%s)",
@@ -1700,20 +1709,21 @@ class Engine:
                                             smart_season_search_triggered = False
                                             skip_missing_process = True
                                             continue
-                                        if season_wait_result == "ready" and not smart_season_monitor.season_is_torrent_pack(
-                                            sid, sn
+                                        if (
+                                            season_wait_result == "ready"
+                                            and not smart_season_monitor.season_is_torrent_pack(sid, sn)
                                         ):
                                             triggered_missing = missing_cap
                                             skip_missing_process = True
                                             break
-                                        if season_wait_result == "ready" and smart_season_monitor.season_is_torrent_pack(
-                                            sid, sn
+                                        if (
+                                            season_wait_result == "ready"
+                                            and smart_season_monitor.season_is_torrent_pack(sid, sn)
                                         ):
                                             skip_missing_process = False
                                         if season_wait_result != "ready":
                                             smart_season_monitor.wait_for_completion(
-                                                SMART_SEASON_MONITOR_SETTLE_SECONDS
-                                                + SMART_SEASON_MONITOR_POLL_SECONDS
+                                                SMART_SEASON_MONITOR_SETTLE_SECONDS + SMART_SEASON_MONITOR_POLL_SECONDS
                                             )
                                             detected_episode_grabs = smart_season_monitor.snapshot_episode_grabs()
                                             if detected_episode_grabs > triggered_missing:
@@ -1721,7 +1731,10 @@ class Engine:
                                             if triggered_missing < missing_cap:
                                                 triggered_missing = missing_cap
                                             skip_missing_process = True
-                                            if smart_season_monitor.brake_event.is_set() and not smart_season_brake_reported:
+                                            if (
+                                                smart_season_monitor.brake_event.is_set()
+                                                and not smart_season_brake_reported
+                                            ):
                                                 stats.smart_season_searches_braked += 1
                                                 smart_season_brake_reported = True
                                             break
@@ -1730,8 +1743,7 @@ class Engine:
                                             or smart_season_monitor.has_burst_candidate()
                                         ):
                                             smart_season_monitor.wait_for_completion(
-                                                SMART_SEASON_MONITOR_SETTLE_SECONDS
-                                                + SMART_SEASON_MONITOR_POLL_SECONDS
+                                                SMART_SEASON_MONITOR_SETTLE_SECONDS + SMART_SEASON_MONITOR_POLL_SECONDS
                                             )
                                             detected_episode_grabs = smart_season_monitor.snapshot_episode_grabs()
                                             if detected_episode_grabs > triggered_missing:

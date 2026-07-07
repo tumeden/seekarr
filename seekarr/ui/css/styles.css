@@ -51,6 +51,8 @@ body.auth-locked .settings-save-fab {
 }
 
 .sidebar {
+  display: flex;
+  flex-direction: column;
   background: linear-gradient(180deg, rgba(11, 11, 12, 0.98), rgba(8, 8, 9, 0.98));
   border-right: 1px solid rgba(249, 115, 22, 0.14);
   padding: 22px 16px 18px;
@@ -127,6 +129,11 @@ body.auth-locked .settings-save-fab {
 .sidebar-nav {
   display: flex;
   flex-direction: column;
+}
+
+.sidebar-nav-bottom {
+  margin-top: auto;
+  padding-top: 14px;
 }
 
 .sidebar-badge {
@@ -522,6 +529,100 @@ button:active {
 
 .section-head .subline {
   font-size: 12px;
+}
+
+.section-kicker {
+  margin-bottom: 6px;
+  color: var(--accent-color);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tips-page {
+  display: grid;
+  gap: 12px;
+}
+
+.tips-board-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  background: rgba(15, 18, 24, 0.72);
+}
+
+.tips-board-head h2 {
+  margin: 0 0 4px;
+  color: var(--text-primary);
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.tips-thread-list {
+  display: grid;
+  gap: 10px;
+}
+
+.tips-thread {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 8px;
+  background: rgba(15, 18, 24, 0.66);
+}
+
+.tips-thread-index {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.08);
+  color: rgba(226, 232, 240, 0.72);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.tips-thread-title {
+  margin-bottom: 5px;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.tips-thread-path {
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 6px;
+  background: rgba(2, 6, 12, 0.50);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tips-thread-reply {
+  margin-top: 7px;
+  padding-left: 10px;
+  border-left: 2px solid rgba(249, 115, 22, 0.28);
+  color: rgba(226, 232, 240, 0.90);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.tips-thread-reply strong {
+  color: var(--text-primary);
 }
 
 .table-wrap {
@@ -2215,7 +2316,7 @@ body {
 }
 
 .sidebar-badges {
-  margin-top: auto;
+  margin-top: 16px;
 }
 
 .history-empty {
@@ -2981,6 +3082,15 @@ body {
 
   .topbar-message {
     width: 100%;
+  }
+
+  .tips-board-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .tips-thread {
+    grid-template-columns: 1fr;
   }
 
   .dashboard-add-instance-grid {

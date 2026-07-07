@@ -14,6 +14,14 @@ def test_count_search_actions_for_item(tmp_path) -> None:
     assert store.count_search_actions_for_item("sonarr", 1, "season:10:1") == 2
 
 
+def test_record_search_events_bulk_counts_toward_rate_window(tmp_path) -> None:
+    store = StateStore(str(tmp_path / "seekarr.db"))
+    store.record_search_event("sonarr", 1)
+    store.record_search_events("sonarr", 1, 4)
+
+    assert store.count_search_events_since("sonarr", 1, "2000-01-01T00:00:00+00:00") == 5
+
+
 def test_search_action_media_roundtrip_and_backfill(tmp_path) -> None:
     store = StateStore(str(tmp_path / "seekarr.db"))
     store.record_search_action(

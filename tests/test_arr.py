@@ -57,6 +57,46 @@ def test_fetch_queue_episode_ids(monkeypatch) -> None:
     assert client.fetch_queue_episode_ids() == {10, 11}
 
 
+def test_trigger_season_search_command_returns_command_id(monkeypatch) -> None:
+    client = ArrClient(
+        name="sonarr",
+        config=ArrConfig(enabled=True, url="http://example", api_key="abc"),
+        timeout_seconds=5,
+        verify_ssl=True,
+        logger=logging.getLogger("test"),
+    )
+
+    def _fake_request(method, path, params=None, json_data=None):  # noqa: ANN001
+        assert method == "POST"
+        assert path == "/api/v3/command"
+        assert json_data == {"name": "SeasonSearch", "seriesId": 10, "seasonNumber": 2}
+        return {"id": 55}
+
+    monkeypatch.setattr(client, "_request", _fake_request)
+
+    assert client.trigger_season_search_command(10, 2) == 55
+    assert client.trigger_season_search(10, 2)
+
+
+def test_fetch_command(monkeypatch) -> None:
+    client = ArrClient(
+        name="sonarr",
+        config=ArrConfig(enabled=True, url="http://example", api_key="abc"),
+        timeout_seconds=5,
+        verify_ssl=True,
+        logger=logging.getLogger("test"),
+    )
+
+    def _fake_request(method, path, params=None, json_data=None):  # noqa: ANN001
+        assert method == "GET"
+        assert path == "/api/v3/command/55"
+        return {"id": 55, "status": "completed"}
+
+    monkeypatch.setattr(client, "_request", _fake_request)
+
+    assert client.fetch_command(55) == {"id": 55, "status": "completed"}
+
+
 def test_fetch_wanted_episodes_skips_cutoff_items_already_met(monkeypatch) -> None:
     client = ArrClient(
         name="sonarr",

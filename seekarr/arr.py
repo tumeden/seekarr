@@ -611,14 +611,22 @@ class ArrClient:
             self.logger.warning("Sonarr command failed for %s episodes: %s", len(episode_ids), exc)
             return False
 
-    def trigger_season_search(self, series_id: int, season_number: int) -> bool:
+    def _command_id_from_payload(self, payload: dict[str, Any] | list[Any] | int | None) -> int | None:
+        if isinstance(payload, int):
+            return payload if payload > 0 else None
+        if isinstance(payload, dict):
+            command_id = int(payload.get("id") or 0)
+            return command_id if command_id > 0 else None
+        return None
+
+    def trigger_season_search_command(self, series_id: int, season_number: int) -> int | None:
         try:
-            self._request(
+            payload = self._request(
                 "POST",
                 "/api/v3/command",
                 json_data={"name": "SeasonSearch", "seriesId": int(series_id), "seasonNumber": int(season_number)},
             )
-            return True
+            return self._command_id_from_payload(payload)
         except ArrRequestError as exc:
             self.logger.warning(
                 "Sonarr command failed for series %s season %s: %s",
@@ -626,6 +634,19 @@ class ArrClient:
                 season_number,
                 exc,
             )
+            return None
+
+    def trigger_season_search(self, series_id: int, season_number: int) -> bool:
+        command_id = self.trigger_season_search_command(series_id, season_number)
+        return command_id is not None
+
+    def fetch_command(self, command_id: int) -> dict[str, Any]:
+        try:
+            payload = self._request("GET", f"/api/v3/command/{int(command_id)}")
+            return payload if isinstance(payload, dict) else {}
+        except ArrRequestError as exc:
+            self.logger.warning("%s command status fetch failed for %s: %s", self.name.capitalize(), command_id, exc)
+            return {}
             return False
 
     def fetch_series_season_inventory(self, series_id: int) -> dict[int, dict[str, int]]:

@@ -92,9 +92,16 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     needs: [format, format-check]
-    if: always() && !cancelled() && needs.format.result != 'failure' && needs.format-check.result != 'failure' && needs.format.outputs.changed != 'true'
+    if: always() && !cancelled() && needs.format.result != 'failure' && needs.format-check.result != 'failure'
     steps:
+      - name: Checkout latest branch
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
+
       - name: Checkout
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
         uses: actions/checkout@v7
 
       - name: Setup Python
@@ -115,13 +122,20 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     needs: [format, format-check]
-    if: always() && !cancelled() && needs.format.result != 'failure' && needs.format-check.result != 'failure' && needs.format.outputs.changed != 'true'
+    if: always() && !cancelled() && needs.format.result != 'failure' && needs.format-check.result != 'failure'
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
+      - name: Checkout latest branch
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
+
       - name: Checkout
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
         uses: actions/checkout@v7
 
       - name: Setup Python

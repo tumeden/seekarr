@@ -6,6 +6,14 @@
     });
 
     document.getElementById('instance-cards').addEventListener('click', (e) => {
+      const addInstanceBtn = e.target && e.target.closest ? e.target.closest('button[data-dashboard-add-instance]') : null;
+      if (addInstanceBtn) {
+        const app = String(addInstanceBtn.getAttribute('data-dashboard-add-instance') || '').trim().toLowerCase();
+        window.settingsActiveTab = app === 'sonarr' ? 'sonarr' : 'radarr';
+        setSection('settings');
+        loadSettings();
+        return;
+      }
       const settingsBtn = e.target && e.target.closest ? e.target.closest('button[data-open-settings-app]') : null;
       if (settingsBtn) {
         const app = settingsBtn.getAttribute('data-open-settings-app');

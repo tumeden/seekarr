@@ -49,10 +49,27 @@
       const cards = document.getElementById('instance-cards');
       cards.setAttribute('data-count', String(dashboardInstances.length));
       cards.innerHTML = '';
+      const addInstanceTile = (app, label, sub) => `
+        <button class="settings-add-tile dashboard-add-instance-tile" data-dashboard-add-instance="${safe(app)}" type="button">
+          <span class="settings-add-tile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
+          </span>
+          <span class="settings-add-tile-copy">
+            <span class="settings-add-tile-title">Add ${safe(label)}</span>
+            <span class="settings-add-tile-sub">${safe(sub)}</span>
+          </span>
+        </button>
+      `;
+      const addInstanceTiles = `
+        <div class="dashboard-add-instance-grid">
+          ${addInstanceTile('radarr', 'Radarr', 'Add a movie server')}
+          ${addInstanceTile('sonarr', 'Sonarr', 'Add a series server')}
+        </div>
+      `;
       if (!instances.length) {
-        cards.innerHTML = `<div class="card empty-state-card"><div class="section-head"><h3>No Instances Configured</h3><div class="subline">Add a Radarr or Sonarr instance from Configuration.</div></div></div>`;
+        cards.innerHTML = `<div class="card empty-state-card"><div class="section-head empty-state-head"><h3>No Instances Configured</h3><div class="subline">Open Configuration to add Radarr or Sonarr.</div></div>${addInstanceTiles}</div>`;
       } else if (!dashboardInstances.length) {
-        cards.innerHTML = `<div class="card empty-state-card"><div class="section-head"><h3>No Ready Instances</h3><div class="subline">Enable an instance and add its Arr URL and API key from Configuration.</div></div></div>`;
+        cards.innerHTML = `<div class="card empty-state-card"><div class="section-head empty-state-head"><h3>No Ready Instances</h3><div class="subline">Open Configuration to add Radarr or Sonarr. Enable an instance and add its Arr URL and API key.</div></div>${addInstanceTiles}</div>`;
       }
       for (const i of dashboardInstances) {
         const key = `${i.app}:${i.instance_id}`;

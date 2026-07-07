@@ -159,14 +159,17 @@
           btn.disabled = false;
           return;
         }
+        const deletedKey = `${String(deleteInstanceTarget.app || '').trim().toLowerCase()}:${Number(deleteInstanceTarget.instanceId || 0)}`;
         hideDeleteInstanceModal();
-        window.settingsActiveTab = 'global';
+        if (window.settingsOpenSettingsKey === deletedKey) {
+          window.settingsOpenSettingsKey = '';
+        }
         msg.textContent = 'Instance removed';
         settingsStatusMessage = 'Instance removed';
         syncSettingsSaveFab();
         await loadSettings();
         await refresh();
-        showToast('Instance Removed', 'Returned to Global Settings.');
+        showToast('Instance Removed', 'Instance was removed.');
       } catch (e) {
         err.textContent = 'Remove failed';
         btn.disabled = false;

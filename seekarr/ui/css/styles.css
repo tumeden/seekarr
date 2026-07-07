@@ -1989,12 +1989,29 @@ body {
 }
 
 .empty-state-card {
+  display: grid;
+  gap: 16px;
   margin: 0;
   padding: 18px 20px;
 }
 
 .empty-state-card .section-head {
   margin-bottom: 0;
+}
+
+.empty-state-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dashboard-add-instance-grid {
+  display: grid;
+  max-width: 720px;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 14px;
 }
 
 .instance-card-shell {
@@ -2964,6 +2981,11 @@ body {
 
   .topbar-message {
     width: 100%;
+  }
+
+  .dashboard-add-instance-grid {
+    max-width: none;
+    grid-template-columns: 1fr;
   }
 
   .topbar-title-wrap p {

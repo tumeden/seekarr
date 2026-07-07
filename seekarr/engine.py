@@ -604,9 +604,9 @@ class Engine:
                                 continue
                             monitor_state.brake_event.set()
                             last_watch_match_at = float(watch.last_match_at or 0.0)
-                            expected_complete = bool(
-                                watch.expected_episode_ids
-                            ) and watch.expected_episode_ids.issubset(watch.matched_episode_ids)
+                            expected_complete = bool(watch.expected_episode_ids) and watch.expected_episode_ids.issubset(
+                                watch.matched_episode_ids
+                            )
                             settled = (
                                 last_watch_match_at > 0
                                 and (time.monotonic() - last_watch_match_at) >= SMART_SEASON_MONITOR_SETTLE_SECONDS

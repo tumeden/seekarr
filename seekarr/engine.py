@@ -18,6 +18,12 @@ from .state import StateStore
 RECENT_PRIORITY_WINDOW_DAYS = 2
 RECENT_RETRY_HOURS = 6
 SONARR_SEASON_PACK_ATTEMPT_FALLBACK = 3
+SMART_SEASON_MONITOR_TIMEOUT_SECONDS = 35
+SMART_SEASON_MONITOR_POLL_SECONDS = 5
+SMART_SEASON_MONITOR_SETTLE_SECONDS = 10
+SMART_SEASON_EPISODE_EXPLOSION_THRESHOLD = 3
+SONARR_SMART_MIN_SECONDS_BETWEEN_ACTIONS = 5
+SONARR_SMART_MAX_SECONDS_BETWEEN_ACTIONS = 20
 _FIXED_OFFSET_TZ_RE = re.compile(r"^([+-])(\d{2}):(\d{2})$")
 
 
@@ -57,6 +63,18 @@ def _episode_order_key(item: Any) -> tuple[int, int, float, int]:
         dt.timestamp() if dt else 0.0,
         int(getattr(item, "episode_id", 0) or 0),
     )
+
+
+def _sonarr_smart_pace_seconds(missing_cap: int, triggered_missing: int) -> int:
+    cap = max(1, int(missing_cap or 0))
+    remaining = max(0, cap - int(triggered_missing or 0))
+    if remaining <= 1:
+        return SONARR_SMART_MIN_SECONDS_BETWEEN_ACTIONS
+    if cap <= 1:
+        return SONARR_SMART_MIN_SECONDS_BETWEEN_ACTIONS
+    span = SONARR_SMART_MAX_SECONDS_BETWEEN_ACTIONS - SONARR_SMART_MIN_SECONDS_BETWEEN_ACTIONS
+    ratio = float(remaining - 1) / float(cap - 1)
+    return int(round(SONARR_SMART_MIN_SECONDS_BETWEEN_ACTIONS + (span * ratio)))
 
 
 def _prioritize_cold_start_seasons(
@@ -178,6 +196,7 @@ class CycleStats:
     cleanup_candidates: int = 0
     cleanup_actions_triggered: int = 0
     cleanup_actions_dry_run: int = 0
+    smart_season_searches_braked: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -191,7 +210,28 @@ class CycleStats:
             "cleanup_candidates": self.cleanup_candidates,
             "cleanup_actions_triggered": self.cleanup_actions_triggered,
             "cleanup_actions_dry_run": self.cleanup_actions_dry_run,
+            "smart_season_searches_braked": self.smart_season_searches_braked,
         }
+
+
+@dataclass
+class SmartSeasonMonitorState:
+    brake_event: threading.Event
+    completed_event: threading.Event
+    lock: threading.Lock
+    detected_episode_grabs: int = 0
+
+    def add_episode_grabs(self, count: int) -> None:
+        with self.lock:
+            self.detected_episode_grabs += max(0, int(count))
+            self.brake_event.set()
+
+    def snapshot_episode_grabs(self) -> int:
+        with self.lock:
+            return int(self.detected_episode_grabs)
+
+    def wait_for_completion(self, timeout_seconds: float) -> bool:
+        return self.completed_event.wait(max(0.0, float(timeout_seconds)))
 
 
 class Engine:
@@ -217,6 +257,36 @@ class Engine:
     def _mark_action(self) -> None:
         with self._pacer_lock:
             self._last_action_at = time.monotonic()
+
+    def _emit_run_progress(
+        self,
+        progress_cb: Callable[[dict[str, Any]], None] | None,
+        *,
+        app_type: str,
+        instance: ArrSyncInstanceConfig,
+        phase: str,
+        message: str,
+        title: str = "",
+        current: int | None = None,
+        total: int | None = None,
+    ) -> None:
+        if not progress_cb:
+            return
+        evt: dict[str, Any] = {
+            "type": "run_progress",
+            "app_type": app_type,
+            "instance_id": instance.instance_id,
+            "instance_name": instance.instance_name,
+            "phase": phase,
+            "message": message,
+        }
+        if title:
+            evt["title"] = title
+        if current is not None:
+            evt["current"] = int(current)
+        if total is not None:
+            evt["total"] = int(total)
+        progress_cb(evt)
 
     def _queue_item_title(self, row: dict[str, Any]) -> str:
         title = str(row.get("title") or "").strip()
@@ -284,6 +354,107 @@ class Engine:
             and not estimated
             and (progress_value is None or progress_value < 100)
         )
+
+    def _queue_row_identity(self, row: dict[str, Any]) -> str:
+        queue_id = str(row.get("id") or "").strip()
+        if queue_id:
+            return f"id:{queue_id}"
+        download_id = str(row.get("downloadId") or row.get("downloadId".lower()) or "").strip()
+        if download_id:
+            return f"download:{download_id}"
+        title = str(row.get("title") or "").strip().lower()
+        return f"title:{title}" if title else ""
+
+    def _queue_row_sonarr_episode_id(self, row: dict[str, Any]) -> int:
+        episode_id = int(row.get("episodeId") or 0)
+        if episode_id > 0:
+            return episode_id
+        episode = row.get("episode") if isinstance(row.get("episode"), dict) else {}
+        return int(episode.get("id") or 0)
+
+    def _queue_row_matches_sonarr_season(self, row: dict[str, Any], series_id: int, season_number: int) -> bool:
+        row_series_id = int(row.get("seriesId") or 0)
+        series = row.get("series") if isinstance(row.get("series"), dict) else {}
+        row_series_id = row_series_id or int(series.get("id") or 0)
+        if row_series_id != int(series_id):
+            return False
+        row_season = int(row.get("seasonNumber") or 0)
+        episode = row.get("episode") if isinstance(row.get("episode"), dict) else {}
+        row_season = row_season or int(episode.get("seasonNumber") or 0)
+        return row_season == int(season_number)
+
+    def _start_smart_season_queue_monitor(
+        self,
+        *,
+        client: ArrClient,
+        instance: ArrSyncInstanceConfig,
+        series_id: int,
+        season_number: int,
+        title: str,
+        baseline_queue_ids: set[str],
+        monitor_state: SmartSeasonMonitorState,
+    ) -> None:
+        def monitor() -> None:
+            try:
+                deadline = time.monotonic() + SMART_SEASON_MONITOR_TIMEOUT_SECONDS
+                last_change = time.monotonic()
+                matched_identities: set[str] = set()
+                matched_episode_ids: set[int] = set()
+                matched_episode_titles: dict[int, str] = {}
+                saw_match = False
+                while time.monotonic() < deadline and not monitor_state.brake_event.is_set():
+                    rows = client.fetch_queue()
+                    changed = False
+                    for row in rows:
+                        identity = self._queue_row_identity(row)
+                        if not identity or identity in baseline_queue_ids or identity in matched_identities:
+                            continue
+                        if not self._queue_row_matches_sonarr_season(row, series_id, season_number):
+                            continue
+                        matched_identities.add(identity)
+                        episode_id = self._queue_row_sonarr_episode_id(row)
+                        if episode_id > 0:
+                            matched_episode_ids.add(episode_id)
+                            matched_episode_titles[episode_id] = self._queue_item_title(row)
+                        changed = True
+                        saw_match = True
+                    if changed:
+                        last_change = time.monotonic()
+                    if saw_match and (time.monotonic() - last_change) >= SMART_SEASON_MONITOR_SETTLE_SECONDS:
+                        break
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    time.sleep(min(SMART_SEASON_MONITOR_POLL_SECONDS, remaining))
+
+                episode_like_count = len(matched_episode_ids) if matched_episode_ids else len(matched_identities)
+                if episode_like_count >= SMART_SEASON_EPISODE_EXPLOSION_THRESHOLD:
+                    for episode_id in sorted(matched_episode_ids):
+                        title_value = matched_episode_titles.get(episode_id) or f"{title} episode {episode_id}"
+                        self.store.mark_item_action(
+                            "sonarr",
+                            instance.instance_id,
+                            f"episode:{episode_id}",
+                            "",
+                            title_value,
+                        )
+                    monitor_state.add_episode_grabs(episode_like_count)
+                    self.logger.warning(
+                        "Smart Sonarr season search expanded into %s episode queue items; "
+                        "stopping more season searches for this run: %s (%s)",
+                        episode_like_count,
+                        title,
+                        instance.instance_name,
+                    )
+            finally:
+                monitor_state.completed_event.set()
+
+        thread = threading.Thread(
+            target=monitor,
+            name=f"smart-season-monitor-{instance.instance_id}-{int(series_id)}-{int(season_number)}",
+            daemon=True,
+        )
+        thread.start()
 
     def _cleanup_queue(
         self,
@@ -594,6 +765,7 @@ class Engine:
 
         wanted_count = 0
         status = "success"
+        next_sync_override_iso = None
         try:
             if _instance_sleep_window_enabled(instance):
                 quiet_start = str(
@@ -612,8 +784,22 @@ class Engine:
                     status = "quiet_hours"
                     return
 
+            self._emit_run_progress(
+                progress_cb,
+                app_type=app_type,
+                instance=instance,
+                phase="cleanup",
+                message="Checking download queue cleanup",
+            )
             self._cleanup_queue(app_type, instance, client, stats)
 
+            self._emit_run_progress(
+                progress_cb,
+                app_type=app_type,
+                instance=instance,
+                phase="wanted_fetch",
+                message=f"Fetching wanted {'movies' if app_type == 'radarr' else 'episodes'}",
+            )
             wanted = (
                 client.fetch_wanted_movies(
                     search_missing=bool(getattr(instance, "search_missing", True)),
@@ -650,6 +836,15 @@ class Engine:
                 if non_special:
                     wanted = non_special
 
+            self._emit_run_progress(
+                progress_cb,
+                app_type=app_type,
+                instance=instance,
+                phase="wanted_filter",
+                message=f"Preparing {len(wanted)} wanted {'movies' if app_type == 'radarr' else 'episodes'}",
+                total=len(wanted),
+            )
+
             # Priority:
             # 1) missing items first (new content)
             # 2) then Arr-reported upgrade items
@@ -671,6 +866,14 @@ class Engine:
             cutoff_items = [w for w in wanted if str(getattr(w, "wanted_kind", "")).lower() == "cutoff"]
             monitored_upgrade_items = [w for w in wanted if str(getattr(w, "wanted_kind", "")).lower() == "monitored"]
             if app_type == "sonarr":
+                self._emit_run_progress(
+                    progress_cb,
+                    app_type=app_type,
+                    instance=instance,
+                    phase="queue_check",
+                    message="Checking Sonarr queue for existing episode downloads",
+                    total=len(wanted),
+                )
                 queued_episode_ids = client.fetch_queue_episode_ids()
                 if queued_episode_ids:
                     before_missing = len(missing_items)
@@ -723,6 +926,14 @@ class Engine:
             sonarr_calendar_triples: set[tuple[int, int, int]] = set()
             sonarr_calendar_boost_ts: dict[tuple[int, int, int], float] = {}
             if app_type == "radarr" and search_order == "smart":
+                self._emit_run_progress(
+                    progress_cb,
+                    app_type=app_type,
+                    instance=instance,
+                    phase="smart_order",
+                    message="Checking Radarr calendar for smart priority",
+                    total=len(wanted),
+                )
                 try:
                     calendar_rows = client.fetch_calendar(
                         start=(now_utc - timedelta(days=3)).date(),
@@ -747,6 +958,14 @@ class Engine:
                     # Best-effort only: smart order still works without calendar.
                     pass
             if app_type == "sonarr" and search_order == "smart":
+                self._emit_run_progress(
+                    progress_cb,
+                    app_type=app_type,
+                    instance=instance,
+                    phase="smart_order",
+                    message="Checking Sonarr calendar for smart priority",
+                    total=len(wanted),
+                )
                 try:
                     calendar_rows = client.fetch_calendar(
                         start=(now_utc - timedelta(days=3)).date(),
@@ -868,6 +1087,16 @@ class Engine:
             wanted = missing_items + cutoff_items + monitored_upgrade_items
             wanted_count = len(wanted)
             stats.wanted_total += wanted_count
+            self._emit_run_progress(
+                progress_cb,
+                app_type=app_type,
+                instance=instance,
+                phase="searching",
+                message=(
+                    f"Searching {wanted_count} eligible wanted {'movies' if app_type == 'radarr' else 'episodes'}"
+                ),
+                total=wanted_count,
+            )
 
             triggered_items: set[str] = set()
             effective_min_hours_after_release = int(
@@ -901,6 +1130,8 @@ class Engine:
                 sonarr_missing_mode = "season_packs"
             if sonarr_missing_mode in ("hybrid", "auto"):
                 sonarr_missing_mode = "smart"
+            if app_type == "sonarr" and sonarr_missing_mode == "smart":
+                effective_between_actions = 0
 
             next_eligible_wakeup_utc: datetime | None = None
             if app_type == "sonarr" and effective_min_hours_after_release > 0 and missing_items:
@@ -936,7 +1167,8 @@ class Engine:
                 nonlocal triggered_missing, triggered_cutoff
                 if cap <= 0:
                     return
-                for it in items:
+                total_items = len(items)
+                for idx, it in enumerate(items, start=1):
                     if kind == "missing" and triggered_missing >= cap:
                         return
                     if kind == "cutoff" and triggered_cutoff >= cap:
@@ -953,6 +1185,8 @@ class Engine:
                         min_hours_after_release=effective_min_hours_after_release,
                         pace_seconds=effective_between_actions,
                         wanted_item=it,
+                        progress_current=idx,
+                        progress_total=total_items,
                         client=client,
                         triggered_items=triggered_items,
                         stats=stats,
@@ -1085,6 +1319,12 @@ class Engine:
                             if saw_aired and all_empty:
                                 cold_start_series_ids.add(int(sid))
                         grouped = _prioritize_cold_start_seasons(grouped, cold_start_series_ids)
+                    smart_season_monitor = SmartSeasonMonitorState(
+                        brake_event=threading.Event(),
+                        completed_event=threading.Event(),
+                        lock=threading.Lock(),
+                    )
+                    smart_season_brake_reported = False
 
                     def _smart_mode_action(series_id: int, season_number: int, eps: list[Any]) -> str:
                         """
@@ -1150,10 +1390,25 @@ class Engine:
                     for (sid, sn), eps in grouped:
                         if triggered_missing >= missing_cap:
                             break
+                        if sonarr_missing_mode == "smart" and smart_season_monitor.brake_event.is_set():
+                            detected_episode_grabs = smart_season_monitor.snapshot_episode_grabs()
+                            if detected_episode_grabs > triggered_missing:
+                                triggered_missing = min(missing_cap, detected_episode_grabs)
+                            if not smart_season_brake_reported:
+                                stats.smart_season_searches_braked += 1
+                                smart_season_brake_reported = True
+                            break
                         action = _smart_mode_action(sid, sn, eps)
                         if action == "skip":
                             continue
                         if action == "season_pack":
+                            baseline_queue_ids: set[str] = set()
+                            if sonarr_missing_mode == "smart":
+                                baseline_queue_ids = {
+                                    ident
+                                    for ident in (self._queue_row_identity(row) for row in client.fetch_queue())
+                                    if ident
+                                }
                             before = stats.actions_triggered
                             self._handle_sonarr_season_search(
                                 instance=instance,
@@ -1162,7 +1417,11 @@ class Engine:
                                 rate_window_minutes=rate_window_minutes,
                                 rate_cap=rate_cap,
                                 min_hours_after_release=effective_min_hours_after_release,
-                                pace_seconds=effective_between_actions,
+                                pace_seconds=(
+                                    _sonarr_smart_pace_seconds(missing_cap, triggered_missing)
+                                    if sonarr_missing_mode == "smart"
+                                    else effective_between_actions
+                                ),
                                 series_id=sid,
                                 series_title=str(getattr(eps[0], "series_title", "") or ""),
                                 season_number=sn,
@@ -1174,6 +1433,19 @@ class Engine:
                             )
                             if stats.actions_triggered > before:
                                 triggered_missing += 1
+                                if sonarr_missing_mode == "smart":
+                                    self._start_smart_season_queue_monitor(
+                                        client=client,
+                                        instance=instance,
+                                        series_id=sid,
+                                        season_number=sn,
+                                        title=f"{str(getattr(eps[0], 'series_title', '') or '')} Season {int(sn):02d}",
+                                        baseline_queue_ids=baseline_queue_ids,
+                                        monitor_state=smart_season_monitor,
+                                    )
+                                    smart_season_monitor.wait_for_completion(
+                                        SMART_SEASON_MONITOR_TIMEOUT_SECONDS + SMART_SEASON_MONITOR_POLL_SECONDS
+                                    )
                                 # Pacing is enforced inside the handler so it's shared across instances.
                         else:
                             for ep in sorted(eps, key=_episode_order_key):
@@ -1188,7 +1460,11 @@ class Engine:
                                     rate_window_minutes=rate_window_minutes,
                                     rate_cap=rate_cap,
                                     min_hours_after_release=effective_min_hours_after_release,
-                                    pace_seconds=effective_between_actions,
+                                    pace_seconds=(
+                                        _sonarr_smart_pace_seconds(missing_cap, triggered_missing)
+                                        if sonarr_missing_mode == "smart"
+                                        else effective_between_actions
+                                    ),
                                     wanted_item=ep,
                                     client=client,
                                     triggered_items=triggered_items,
@@ -1310,15 +1586,13 @@ class Engine:
                 _process(missing_items, missing_cap, "missing")
             _process(cutoff_items, cutoff_cap, "cutoff")
             _process(monitored_upgrade_items, cutoff_cap, "cutoff")
-            wakeup_iso = None
             if next_eligible_wakeup_utc:
                 now_utc = datetime.now(timezone.utc)
                 if next_eligible_wakeup_utc > now_utc:
                     wakeup_dt = max(next_eligible_wakeup_utc, now_utc + timedelta(seconds=30))
                     scheduled_dt = now_utc + timedelta(minutes=interval)
                     if wakeup_dt < scheduled_dt:
-                        wakeup_iso = wakeup_dt.isoformat()
-            self._update_sync_status(app_type, instance, interval, next_sync_override_iso=wakeup_iso)
+                        next_sync_override_iso = wakeup_dt.isoformat()
         except Exception:
             status = "error"
             raise
@@ -1342,6 +1616,13 @@ class Engine:
                 status=status,
                 stats=inst_stats,
             )
+            if status == "success":
+                self._update_sync_status(
+                    app_type,
+                    instance,
+                    interval,
+                    next_sync_override_iso=next_sync_override_iso,
+                )
 
     def _update_sync_status(
         self,
@@ -1374,10 +1655,30 @@ class Engine:
         triggered_items: set[str],
         stats: CycleStats,
         progress_cb: Callable[[dict[str, Any]], None] | None = None,
+        progress_current: int | None = None,
+        progress_total: int | None = None,
     ) -> None:
         item_key = wanted_item.item_key
         if item_key in triggered_items:
             return
+        if app_type == "radarr":
+            item_title = str(getattr(wanted_item, "title", "") or "").strip() or "movie"
+        else:
+            item_title = (
+                f"{getattr(wanted_item, 'series_title', '')} "
+                f"S{int(getattr(wanted_item, 'season_number', 0) or 0):02d}"
+                f"E{int(getattr(wanted_item, 'episode_number', 0) or 0):02d}"
+            ).strip()
+        self._emit_run_progress(
+            progress_cb,
+            app_type=app_type,
+            instance=instance,
+            phase="item_check",
+            message=f"Checking {item_title}",
+            title=item_title,
+            current=progress_current,
+            total=progress_total,
+        )
 
         # Release gate: don't waste searches on unreleased content.
         now = datetime.now(timezone.utc)
@@ -1458,10 +1759,10 @@ class Engine:
 
         if app_type == "radarr":
             success = client.trigger_movie_search(wanted_item.movie_id)
-            title = wanted_item.title
+            title = item_title
         else:
             success = client.trigger_episode_search(wanted_item.episode_id)
-            title = f"{wanted_item.series_title} S{wanted_item.season_number:02d}E{wanted_item.episode_number:02d}"
+            title = item_title
 
         if success:
             media = self._resolve_search_action_media(

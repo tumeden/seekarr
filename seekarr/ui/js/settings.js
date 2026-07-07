@@ -143,6 +143,7 @@
         const upgradeScopeRaw = String(inst.upgrade_scope || 'wanted').toLowerCase();
         const upgradeScope = (upgradeScopeRaw === 'all_monitored') ? 'both' : upgradeScopeRaw;
         const order = String(inst.search_order || 'smart').toLowerCase();
+        const isSonarrSmartMode = inst.app === 'sonarr' && mode === 'smart';
         const sleepEnabled = (inst.quiet_hours_enabled !== false);
         const cleanupEnabled = inst.cleanup_enabled === true;
         const cleanupDryRun = inst.cleanup_dry_run === true;
@@ -252,12 +253,12 @@
                 <div class="label">Retry (hours) ${infoIcon('Minimum hours before Seekarr will search the same movie, episode, season, or show batch again.')}</div>
                 <input class="cfg si_retry" name="settings_${safe(key)}_retry_hours" type="number" min="1" value="${safe(inst.item_retry_hours)}"/>
               </div>
-              <div class="field">
+              <div class="field settings-seconds-between-field${isSonarrSmartMode ? ' is-disabled' : ''}">
                 <div class="label">
                   Seconds Between
-                  <span class="info-icon" title="Minimum delay in seconds between consecutive search actions to avoid hammering the indexer."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                  <span class="info-icon" title="Minimum delay in seconds between consecutive search actions to avoid hammering the indexer. Hidden and ignored for Sonarr Smart mode because Smart season searches wait for queue verification instead."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <input class="cfg si_between" name="settings_${safe(key)}_seconds_between" type="number" min="0" value="${safe(inst.min_seconds_between_actions)}"/>
+                <input class="cfg si_between" name="settings_${safe(key)}_seconds_between" type="number" min="0" value="${safe(inst.min_seconds_between_actions)}" ${isSonarrSmartMode ? 'disabled' : ''} aria-disabled="${isSonarrSmartMode ? 'true' : 'false'}"/>
               </div>
               <div class="field">
                 <div class="label">Rate Window (min) ${infoIcon('Rolling time window used with Rate Cap to limit how many searches this instance can trigger.')}</div>
@@ -481,6 +482,7 @@
 
       wrap.innerHTML = renderAppTab('radarr') + renderAppTab('sonarr');
       syncSleepWindowControls(wrap);
+      syncSmartModeTimingControls(wrap);
       window.updateSettingsTabs(window.settingsInstances);
     }
 

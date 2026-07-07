@@ -203,6 +203,9 @@
       if (target.classList.contains('si_quiet_enabled')) {
         syncSleepWindowControls(target.closest('.settings-instance-card') || document);
       }
+      if (target.classList.contains('si_missing_mode')) {
+        syncSmartModeTimingControls(target.closest('.settings-instance-card') || document);
+      }
       if (
         target.id === 'settings-date-format' ||
         target.id === 'settings-time-format' ||

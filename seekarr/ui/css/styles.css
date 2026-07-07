@@ -1734,13 +1734,93 @@ body {
 }
 
 .topbar-message {
-  color: var(--text-muted);
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  border: 1px solid rgba(82, 82, 91, 0.88);
+  border-radius: 8px;
+  background: rgba(39, 39, 42, 0.86);
+  color: var(--text-secondary);
   font-size: 13px;
+  font-weight: 600;
   line-height: 1.35;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.topbar-message.running {
+  border-color: rgba(249, 115, 22, 0.36);
+  background: rgba(67, 43, 24, 0.72);
+  color: #fed7aa;
+  animation: runStatusGlow 2.4s ease-in-out infinite;
+}
+
+.topbar-message.running::before {
+  content: '';
+  display: block;
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #fb923c;
+  box-shadow: 0 0 0 0 rgba(251, 146, 60, 0.45);
+  animation: runStatusPulse 1.35s ease-out infinite;
+}
+
+.topbar-message.error {
+  border-color: rgba(239, 68, 68, 0.42);
+  background: rgba(69, 10, 10, 0.72);
+  color: #fecaca;
+}
+
+.topbar-message.error::before {
+  content: '';
+  display: block;
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #ef4444;
 }
 
 .topbar-message:empty {
   display: none;
+}
+
+@keyframes runStatusPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(251, 146, 60, 0.46);
+    transform: scale(0.9);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(251, 146, 60, 0);
+    transform: scale(1);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(251, 146, 60, 0);
+    transform: scale(0.9);
+  }
+}
+
+@keyframes runStatusGlow {
+  0%, 100% {
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 10px 24px rgba(0, 0, 0, 0.18),
+      0 0 22px rgba(249, 115, 22, 0.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar-message.running,
+  .topbar-message.running::before {
+    animation: none;
+  }
 }
 
 
@@ -2500,12 +2580,19 @@ body {
   opacity: 0.48;
 }
 
+.settings-seconds-between-field.is-disabled {
+  opacity: 0.48;
+}
+
 .sleep-window-fields.is-disabled .label,
-.sleep-window-fields.is-disabled .cfg {
+.sleep-window-fields.is-disabled .cfg,
+.settings-seconds-between-field.is-disabled .label,
+.settings-seconds-between-field.is-disabled .cfg {
   color: var(--text-secondary);
 }
 
-.sleep-window-fields.is-disabled .cfg {
+.sleep-window-fields.is-disabled .cfg,
+.settings-seconds-between-field.is-disabled .cfg {
   cursor: not-allowed;
 }
 

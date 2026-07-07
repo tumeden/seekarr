@@ -26,6 +26,7 @@
       }
       
       const rs = data.run_state || {};
+      updateRunStatusPill(rs);
 
       const hb = data.scheduler_heartbeat || null;
       const hbMs = hb ? Date.parse(hb) : NaN;

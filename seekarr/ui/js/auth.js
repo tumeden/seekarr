@@ -121,11 +121,18 @@
       const warning = document.getElementById('delete-instance-warning');
       const err = document.getElementById('delete-instance-error');
       const pw = document.getElementById('delete-instance-password');
+      const passwordField = document.getElementById('delete-instance-password-field');
       const btn = document.getElementById('delete-instance-submit');
       const appLabel = String(target?.app || '').toUpperCase();
       const instanceLabel = String(target?.instanceName || `#${target?.instanceId || ''}`).trim();
 
-      sub.textContent = `Enter your Web UI password to remove ${appLabel} instance "${instanceLabel}".`;
+      if (passwordIsSet) {
+        sub.textContent = `Enter your Web UI password to remove ${appLabel} instance "${instanceLabel}".`;
+        passwordField.hidden = false;
+      } else {
+        sub.textContent = `Remove ${appLabel} instance "${instanceLabel}"? This cannot be undone.`;
+        passwordField.hidden = true;
+      }
       if (target?.discardUnsaved) {
         warning.style.display = 'block';
         warning.textContent = 'You have unsaved configuration changes. Removing this instance will discard them.';
@@ -137,13 +144,14 @@
       pw.value = '';
       btn.disabled = false;
       modal.classList.add('show');
-      setTimeout(() => pw.focus(), 50);
+      if (passwordIsSet) setTimeout(() => pw.focus(), 50);
     }
 
     function hideDeleteInstanceModal() {
       document.getElementById('delete-instance-modal').classList.remove('show');
       document.getElementById('delete-instance-error').textContent = '';
       document.getElementById('delete-instance-password').value = '';
+      document.getElementById('delete-instance-password-field').hidden = false;
       document.getElementById('delete-instance-submit').disabled = false;
       deleteInstanceTarget = null;
     }

@@ -143,6 +143,7 @@
         const upgradeScopeRaw = String(inst.upgrade_scope || 'wanted').toLowerCase();
         const upgradeScope = (upgradeScopeRaw === 'all_monitored') ? 'both' : upgradeScopeRaw;
         const order = String(inst.search_order || 'smart').toLowerCase();
+        const isSonarrSmartMode = inst.app === 'sonarr' && mode === 'smart';
         const sleepEnabled = (inst.quiet_hours_enabled !== false);
         const cleanupEnabled = inst.cleanup_enabled === true;
         const cleanupDryRun = inst.cleanup_dry_run === true;
@@ -150,6 +151,7 @@
         const cleanupRemoveFromClient = inst.cleanup_remove_from_client !== false;
         const cleanupBlocklist = inst.cleanup_blocklist !== false;
         const cleanupAllowRetry = inst.cleanup_skip_redownload !== true;
+        const infoIcon = (title) => `<span class="info-icon" title="${safe(title)}"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>`;
         const modeUi = (inst.app === 'sonarr') ? `
               <div class="field field-stack-gap">
                 <div class="label">
@@ -186,23 +188,23 @@
                   </label>
                   <span class="info-icon" title="When enabled, this instance will not run during the sleep window. Force runs still bypass it."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <div class="subline">Blocks scheduled runs between the start and end times below. Uses the global timezone configured above.</div>
+                <div class="subline">Blocks scheduled runs between the start and end times below.</div>
               </div>
             </div>
             <div class="settings-grid-auto settings-grid-spaced sleep-window-fields${sleepEnabled ? '' : ' is-disabled'}">
               <div class="field">
-                <div class="label">Start (HH:MM)</div>
+                <div class="label">Start (HH:MM) ${infoIcon('Start time for this instance sleep window. Scheduled runs pause at this time.')}</div>
                 <input class="cfg mono si_quiet_start" name="settings_${safe(key)}_quiet_start" type="text" value="${safe(inst.quiet_hours_start)}" placeholder="23:00" ${sleepEnabled ? '' : 'disabled'} aria-disabled="${sleepEnabled ? 'false' : 'true'}"/>
               </div>
               <div class="field">
-                <div class="label">End (HH:MM)</div>
+                <div class="label">End (HH:MM) ${infoIcon('End time for this instance sleep window. Scheduled runs resume after this time.')}</div>
                 <input class="cfg mono si_quiet_end" name="settings_${safe(key)}_quiet_end" type="text" value="${safe(inst.quiet_hours_end)}" placeholder="06:00" ${sleepEnabled ? '' : 'disabled'} aria-disabled="${sleepEnabled ? 'false' : 'true'}"/>
               </div>
             </div>
         `;
         const orderUi = `
               <div class="field">
-                <div class="label">Search Order</div>
+                <div class="label">Search Order ${infoIcon('Controls the order Seekarr uses when multiple wanted items are eligible in the same run.')}</div>
                   <select class="cfg si_search_order" name="settings_${safe(key)}_search_order">
                   <option value="smart" ${order === 'smart' ? 'selected' : ''}>Smart (Recent, Random, Oldest)</option>
                   <option value="newest" ${order === 'newest' ? 'selected' : ''}>Newest First</option>
@@ -226,11 +228,11 @@
               </div>
               ${orderUi}
               <div class="field">
-                <div class="label">Missing Per Run</div>
+                <div class="label">Missing Per Run ${infoIcon('Maximum missing-item searches Seekarr can trigger for this instance during one scheduled run.')}</div>
                 <input class="cfg si_missing_per_run" name="settings_${safe(key)}_missing_per_run" type="number" min="0" value="${safe(inst.max_missing_actions_per_instance_per_sync)}"/>
               </div>
               <div class="field">
-                <div class="label">Upgrades Per Run</div>
+                <div class="label">Upgrades Per Run ${infoIcon('Maximum upgrade searches Seekarr can trigger for this instance during one scheduled run.')}</div>
                 <input class="cfg si_upgrades_per_run" name="settings_${safe(key)}_upgrades_per_run" type="number" min="0" value="${safe(inst.max_cutoff_actions_per_instance_per_sync)}"/>
               </div>
             </div>
@@ -248,22 +250,22 @@
                 <input class="cfg si_after_release" name="settings_${safe(key)}_after_release" type="number" min="0" value="${safe(inst.min_hours_after_release)}"/>
               </div>
               <div class="field">
-                <div class="label">Retry (hours)</div>
+                <div class="label">Retry (hours) ${infoIcon('Minimum hours before Seekarr will search the same movie, episode, season, or show batch again.')}</div>
                 <input class="cfg si_retry" name="settings_${safe(key)}_retry_hours" type="number" min="1" value="${safe(inst.item_retry_hours)}"/>
               </div>
-              <div class="field">
+              <div class="field settings-seconds-between-field${isSonarrSmartMode ? ' is-disabled' : ''}">
                 <div class="label">
                   Seconds Between
-                  <span class="info-icon" title="Minimum delay in seconds between consecutive search actions to avoid hammering the indexer."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                  <span class="info-icon" title="Minimum delay in seconds between consecutive search actions to avoid hammering the indexer. Hidden and ignored for Sonarr Smart mode because Smart season searches wait for queue verification instead."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
-                <input class="cfg si_between" name="settings_${safe(key)}_seconds_between" type="number" min="0" value="${safe(inst.min_seconds_between_actions)}"/>
+                <input class="cfg si_between" name="settings_${safe(key)}_seconds_between" type="number" min="0" value="${safe(inst.min_seconds_between_actions)}" ${isSonarrSmartMode ? 'disabled' : ''} aria-disabled="${isSonarrSmartMode ? 'true' : 'false'}"/>
               </div>
               <div class="field">
-                <div class="label">Rate Window (min)</div>
+                <div class="label">Rate Window (min) ${infoIcon('Rolling time window used with Rate Cap to limit how many searches this instance can trigger.')}</div>
                 <input class="cfg si_rate_window" name="settings_${safe(key)}_rate_window" type="number" min="1" value="${safe(inst.rate_window_minutes)}"/>
               </div>
               <div class="field">
-                <div class="label">Rate Cap</div>
+                <div class="label">Rate Cap ${infoIcon('Maximum searches this instance can trigger inside the configured rate window.')}</div>
                 <input class="cfg si_rate_cap" name="settings_${safe(key)}_rate_cap" type="number" min="1" value="${safe(inst.rate_cap)}"/>
               </div>
             </div>
@@ -354,11 +356,11 @@
 
             <div class="settings-connection-grid">
               <div class="field">
-                <div class="label">Instance Name</div>
+                <div class="label">Instance Name ${infoIcon('Display name for this Sonarr/Radarr instance inside Seekarr.')}</div>
                 <input class="cfg si_name" name="settings_${safe(key)}_name" type="text" value="${safe(instanceName)}"/>
               </div>
               <div class="field">
-                <div class="label">Arr URL</div>
+                <div class="label">Arr URL ${infoIcon('Base URL for this Sonarr/Radarr instance, including protocol and port if needed.')}</div>
                 <input class="cfg mono si_url" name="settings_${safe(key)}_url" type="text" value="${safe(inst.arr_url)}"/>
               </div>
               <div class="field">
@@ -407,8 +409,8 @@
 	                </div>
 	                <div class="settings-panel-body">
 	                  <div class="pill-row settings-toggle-group">
-	                    <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_missing" name="settings_${safe(key)}_missing" ${inst.search_missing ? 'checked' : ''}> Missing</label>
-	                    <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_cutoff" name="settings_${safe(key)}_cutoff" ${inst.search_cutoff_unmet ? 'checked' : ''}> Upgrades</label>
+		                    <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_missing" name="settings_${safe(key)}_missing" ${inst.search_missing ? 'checked' : ''}> Missing ${infoIcon('Allow this instance to search for missing movies or episodes.')}</label>
+		                    <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_cutoff" name="settings_${safe(key)}_cutoff" ${inst.search_cutoff_unmet ? 'checked' : ''}> Upgrades ${infoIcon('Allow this instance to search for cutoff-unmet or monitored upgrade candidates, depending on Upgrade Source.')}</label>
 	                  </div>
                 </div>
               </div>
@@ -480,6 +482,7 @@
 
       wrap.innerHTML = renderAppTab('radarr') + renderAppTab('sonarr');
       syncSleepWindowControls(wrap);
+      syncSmartModeTimingControls(wrap);
       window.updateSettingsTabs(window.settingsInstances);
     }
 

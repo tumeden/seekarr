@@ -34,6 +34,59 @@
         }, 180);
       }, 2600);
     }
+    function setTopbarRunMessage(text = '', tone = '') {
+      const msg = document.getElementById('msg');
+      if (!msg) return;
+      msg.textContent = text;
+      msg.classList.remove('running', 'error', 'success');
+      if (tone) msg.classList.add(tone);
+    }
+    function updateRunStatusPill(runState = {}) {
+      const rs = runState || {};
+      if (!rs.running) {
+        if (rs.error) {
+          setTopbarRunMessage(`Run failed: ${rs.error}`, 'error');
+        } else {
+          setTopbarRunMessage();
+        }
+        return;
+      }
+
+      const app = String(rs.active_app_type || '').trim();
+      const appLabelText = app ? app.toUpperCase() : 'Arr';
+      const instanceName = String(rs.active_instance_name || '').trim();
+      const source = instanceName ? `${appLabelText} / ${instanceName}` : appLabelText;
+      const triggered = Number(rs.actions_triggered || 0);
+      const cooldown = Number(rs.actions_skipped_cooldown || 0);
+      const rateLimited = Number(rs.actions_skipped_rate_limit || 0);
+      const notReleased = Number(rs.actions_skipped_not_released || 0);
+      const lastTitle = String(rs.last_title || '').trim();
+      const progressMessage = String(rs.progress_message || '').trim();
+      const progressCurrent = Number(rs.progress_current || 0);
+      const progressTotal = Number(rs.progress_total || 0);
+      const parts = [`Running ${source}`];
+
+      if (progressMessage) {
+        parts.push(progressMessage);
+      } else if (lastTitle) {
+        parts.push(`Latest grab: ${lastTitle}`);
+      } else if (instanceName || app) {
+        parts.push('Checking wanted items and limits');
+      } else {
+        parts.push('Preparing run');
+      }
+
+      if (progressCurrent > 0 && progressTotal > 0) {
+        parts.push(`${progressCurrent} of ${progressTotal}`);
+      } else if (progressTotal > 0) {
+        parts.push(`${progressTotal} queued`);
+      }
+      parts.push(`${triggered} triggered`);
+      if (cooldown > 0) parts.push(`${cooldown} cooldown`);
+      if (rateLimited > 0) parts.push(`${rateLimited} rate-limited`);
+      if (notReleased > 0) parts.push(`${notReleased} waiting release`);
+      setTopbarRunMessage(parts.join(' · '), 'running');
+    }
     function fmtBytes(bytes) {
       const n = Number(bytes || 0);
       if (!Number.isFinite(n) || n <= 0) return '0 B';
@@ -269,6 +322,22 @@
           input.disabled = !enabled;
           input.setAttribute('aria-disabled', enabled ? 'false' : 'true');
         });
+      });
+    }
+    function syncSmartModeTimingControls(scope=document) {
+      const root = (scope && typeof scope.querySelectorAll === 'function') ? scope : document;
+      root.querySelectorAll('.settings-instance-card').forEach(card => {
+        const app = String(card.getAttribute('data-app') || '').trim().toLowerCase();
+        const mode = String(card.querySelector('.si_missing_mode')?.value || '').trim().toLowerCase();
+        const field = card.querySelector('.settings-seconds-between-field');
+        const input = card.querySelector('.si_between');
+        if (!field) return;
+        const disabled = app === 'sonarr' && mode === 'smart';
+        field.classList.toggle('is-disabled', disabled);
+        if (input) {
+          input.disabled = disabled;
+          input.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+        }
       });
     }
     function confirmDiscardUnsavedSettings(actionLabel) {

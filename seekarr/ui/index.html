@@ -91,6 +91,12 @@
         Configuration
       </a>
       </nav>
+      <nav class="sidebar-nav sidebar-nav-bottom" aria-label="Help">
+        <a class="nav-item nav-control" data-section="tips" href="#">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M12 2a7 7 0 0 0-4 12.74V16h8v-1.26A7 7 0 0 0 12 2z"></path></svg>
+          Tips
+        </a>
+      </nav>
       <div class="sidebar-badges">
         <a class="sidebar-badge" href="https://github.com/tumeden/seekarr" target="_blank" rel="noopener noreferrer">GitHub</a>
         <a class="sidebar-badge" href="https://hub.docker.com/r/tumeden/seekarr" target="_blank" rel="noopener noreferrer">Docker Hub</a>
@@ -111,6 +117,7 @@
         <button class="mobile-nav-item nav-control active" data-section="dashboard" type="button">Dashboard</button>
         <button class="mobile-nav-item nav-control" data-section="runs" type="button">History</button>
         <button class="mobile-nav-item nav-control" data-section="settings" type="button">Configuration</button>
+        <button class="mobile-nav-item nav-control" data-section="tips" type="button">Tips</button>
       </div>
       <span class="topbar-message" id="msg"></span>
       
@@ -253,6 +260,48 @@
           </div>
           
           <div id="settings-instance-cards"></div>
+        </div>
+      </section>
+
+      <section class="content-section" id="section-tips">
+        <div class="tips-page">
+          <div class="tips-board-head">
+            <div>
+              <h2>Tips</h2>
+              <div class="subline">Recommended, but not required.</div>
+            </div>
+          </div>
+
+          <div class="tips-thread-list">
+            <article class="tips-thread">
+              <div class="tips-thread-index">01</div>
+              <div class="tips-thread-main">
+                <div class="tips-thread-title">Sonarr/Radarr: Stop immediate failed-download retries</div>
+                <div class="tips-thread-path">Radarr/Sonarr -> Settings -> Download Clients -> uncheck Redownload Failed</div>
+                <div class="tips-thread-reply">
+                  <strong>Why:</strong> failed releases can cause Radarr/Sonarr to search again immediately. If that happens repeatedly, it can create noisy retry bursts and make your indexers work harder than they need to.
+                </div>
+                <div class="tips-thread-reply">
+                  Letting Seekarr handle retry timing keeps failed-download searches coordinated with your scheduled runs, rate caps, retry windows, and per-run limits.
+                </div>
+              </div>
+            </article>
+
+            <article class="tips-thread">
+              <div class="tips-thread-index">02</div>
+              <div class="tips-thread-main">
+                <div class="tips-thread-title">SEERR: Add monitored items without searching right away</div>
+                <div class="tips-thread-path">SEERR -> Services -> edit Radarr/Sonarr -> uncheck Automatic Search</div>
+                <div class="tips-thread-reply">
+                  <strong>Why:</strong> SEERR typically runs all of its searches at once. If someone requests a lot of shows or movies, that can send dozens or hundreds of indexer searches in a short burst.
+                </div>
+                <div class="tips-thread-reply">
+                  Disabling Automatic Search lets SEERR add the items to Radarr/Sonarr as monitored, then Seekarr handles the searching at a paced interval using your configured limits.
+                </div>
+              </div>
+            </article>
+
+          </div>
         </div>
       </section>
       </div>

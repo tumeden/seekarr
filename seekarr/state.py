@@ -629,6 +629,17 @@ class StateStore:
                 (hunt_type, instance_id, _utc_now()),
             )
 
+    def record_search_events(self, hunt_type: str, instance_id: int, count: int) -> None:
+        count = max(0, int(count))
+        if count <= 0:
+            return
+        now = _utc_now()
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT INTO search_event(hunt_type, instance_id, occurred_at) VALUES(?, ?, ?)",
+                [(hunt_type, instance_id, now) for _ in range(count)],
+            )
+
     def record_search_action(
         self,
         hunt_type: str,

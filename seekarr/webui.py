@@ -412,7 +412,12 @@ def create_app(db_path: str | None = None) -> Flask:
         "actions_triggered": 0,
         "actions_skipped_cooldown": 0,
         "actions_skipped_rate_limit": 0,
+        "actions_skipped_not_released": 0,
         "last_title": None,
+        "progress_phase": None,
+        "progress_message": None,
+        "progress_current": None,
+        "progress_total": None,
         "recent_actions": [],
         "error": None,
         "active_app_type": None,
@@ -896,7 +901,12 @@ def create_app(db_path: str | None = None) -> Flask:
                 run_state["actions_triggered"] = 0
                 run_state["actions_skipped_cooldown"] = 0
                 run_state["actions_skipped_rate_limit"] = 0
+                run_state["actions_skipped_not_released"] = 0
                 run_state["last_title"] = None
+                run_state["progress_phase"] = None
+                run_state["progress_message"] = None
+                run_state["progress_current"] = None
+                run_state["progress_total"] = None
                 run_state["error"] = None
                 run_state["active_app_type"] = None
                 run_state["active_instance_id"] = None
@@ -905,11 +915,29 @@ def create_app(db_path: str | None = None) -> Flask:
                 run_state["active_app_type"] = evt.get("app_type")
                 run_state["active_instance_id"] = evt.get("instance_id")
                 run_state["active_instance_name"] = evt.get("instance_name")
+                run_state["progress_phase"] = "instance"
+                run_state["progress_message"] = "Starting instance run"
+                run_state["progress_current"] = None
+                run_state["progress_total"] = None
+            elif evt.get("type") == "run_progress":
+                run_state["active_app_type"] = evt.get("app_type")
+                run_state["active_instance_id"] = evt.get("instance_id")
+                run_state["active_instance_name"] = evt.get("instance_name")
+                run_state["progress_phase"] = evt.get("phase")
+                run_state["progress_message"] = evt.get("message")
+                run_state["progress_current"] = evt.get("current")
+                run_state["progress_total"] = evt.get("total")
+                if evt.get("title"):
+                    run_state["last_title"] = evt.get("title")
             elif evt.get("type") == "item_triggered":
                 run_state["actions_triggered"] = int(evt.get("actions_triggered") or 0)
                 run_state["actions_skipped_cooldown"] = int(evt.get("actions_skipped_cooldown") or 0)
                 run_state["actions_skipped_rate_limit"] = int(evt.get("actions_skipped_rate_limit") or 0)
                 run_state["last_title"] = evt.get("title")
+                run_state["progress_phase"] = "triggered"
+                run_state["progress_message"] = "Triggered search"
+                run_state["progress_current"] = None
+                run_state["progress_total"] = None
                 # Keep a small recent history for the UI.
                 try:
                     lst = list(run_state.get("recent_actions") or [])
@@ -926,8 +954,16 @@ def create_app(db_path: str | None = None) -> Flask:
                 run_state["recent_actions"] = lst[-8:]
             elif evt.get("type") == "item_skipped_cooldown":
                 run_state["actions_skipped_cooldown"] = int(evt.get("actions_skipped_cooldown") or 0)
+                run_state["progress_phase"] = "cooldown"
+                run_state["progress_message"] = "Skipped item on retry cooldown"
             elif evt.get("type") == "item_skipped_rate_limit":
                 run_state["actions_skipped_rate_limit"] = int(evt.get("actions_skipped_rate_limit") or 0)
+                run_state["progress_phase"] = "rate_limit"
+                run_state["progress_message"] = "Skipped item due to rate limit"
+            elif evt.get("type") == "item_skipped_not_released":
+                run_state["actions_skipped_not_released"] = int(evt.get("actions_skipped_not_released") or 0)
+                run_state["progress_phase"] = "not_released"
+                run_state["progress_message"] = "Skipped item before release delay"
             elif evt.get("type") == "instance_finished":
                 # Clear "active" if we just finished the active instance.
                 if run_state.get("active_app_type") == evt.get("app_type") and run_state.get(
@@ -936,12 +972,20 @@ def create_app(db_path: str | None = None) -> Flask:
                     run_state["active_app_type"] = None
                     run_state["active_instance_id"] = None
                     run_state["active_instance_name"] = None
+                    run_state["progress_phase"] = "instance_finished"
+                    run_state["progress_message"] = "Finished instance run"
+                    run_state["progress_current"] = None
+                    run_state["progress_total"] = None
             elif evt.get("type") == "cycle_finished":
                 run_state["running"] = False
                 run_state["error"] = evt.get("error")
                 run_state["active_app_type"] = None
                 run_state["active_instance_id"] = None
                 run_state["active_instance_name"] = None
+                run_state["progress_phase"] = None
+                run_state["progress_message"] = None
+                run_state["progress_current"] = None
+                run_state["progress_total"] = None
 
     def _start_run_async(force: bool) -> bool:
         if not run_lock.acquire(blocking=False):

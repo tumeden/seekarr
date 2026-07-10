@@ -564,11 +564,13 @@ def create_app(db_path: str | None = None) -> Flask:
     @app.get("/api/auth/status")
     def auth_status() -> Any:
         password_set = auth_mode == "password" and bool(password_hash)
-        return jsonify({
-            "password_set": password_set,
-            "auth_configured": auth_mode in ("password", "none"),
-            "password_enabled": password_set,
-        })
+        return jsonify(
+            {
+                "password_set": password_set,
+                "auth_configured": auth_mode in ("password", "none"),
+                "password_enabled": password_set,
+            }
+        )
 
     @app.post("/api/auth/bootstrap")
     def auth_bootstrap() -> Any:

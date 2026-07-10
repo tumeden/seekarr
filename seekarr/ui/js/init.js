@@ -32,6 +32,8 @@
     });
 
     document.getElementById('auth-submit').addEventListener('click', authSubmit);
+    document.getElementById('auth-no-password').addEventListener('click', continueWithoutPassword);
+    document.getElementById('auth-use-password').addEventListener('click', showPasswordSetup);
     document.getElementById('auth-password').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') authSubmit();
     });

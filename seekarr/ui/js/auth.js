@@ -64,6 +64,8 @@
       const err = document.getElementById('auth-error');
       const pw = document.getElementById('auth-password');
       const btn = document.getElementById('auth-submit');
+      const choice = document.getElementById('auth-choice');
+      const form = document.getElementById('auth-password-form');
 
       err.textContent = '';
       btn.disabled = false;
@@ -76,13 +78,22 @@
       }
 
       if (mode === 'set') {
+        sub.textContent = 'Welcome to Seekarr.';
+        choice.hidden = false;
+        form.hidden = true;
+        hint.textContent = 'Minimum 8 characters.';
+      } else if (mode === 'set-password') {
         sub.textContent = 'Create a password to secure access to the Seekarr Web UI.';
+        choice.hidden = true;
+        form.hidden = false;
         label.textContent = 'New Password';
         pw.setAttribute('autocomplete', 'new-password');
-        hint.textContent = 'Minimum 8 characters. Saved as a salted hash in the SQLite DB.';
+        hint.textContent = '';
         btn.textContent = 'Save Password';
       } else {
         sub.textContent = 'Enter your Web UI password to continue.';
+        choice.hidden = true;
+        form.hidden = false;
         label.textContent = 'Password';
         pw.setAttribute('autocomplete', 'current-password');
         hint.textContent = '';
@@ -92,6 +103,10 @@
       document.body.classList.add('auth-locked');
       modal.classList.add('show');
       setTimeout(() => pw.focus(), 50);
+    }
+
+    function showPasswordSetup() {
+      showAuthModal('set-password');
     }
 
     function hideAuthModal() {
@@ -195,8 +210,85 @@
       }
       const st = await fetch('/api/auth/status', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}));
       passwordIsSet = !!st.password_set;
-      showAuthModal(passwordIsSet ? 'login' : 'set');
+      if (st.auth_configured && !passwordIsSet) {
+        hideAuthModal();
+        await refresh();
+        startTimers();
+      } else {
+        showAuthModal(passwordIsSet ? 'login' : 'set');
+      }
       authInFlight = false;
+    }
+
+    async function continueWithoutPassword() {
+      const err = document.getElementById('auth-error');
+      const btn = document.getElementById('auth-no-password');
+      err.textContent = '';
+      btn.disabled = true;
+      try {
+        const r = await fetch('/api/auth/bootstrap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password_enabled: false }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          err.textContent = data.error || 'Failed to save password preference';
+          btn.disabled = false;
+          return;
+        }
+        passwordIsSet = false;
+        clearAuthHeader();
+        hideAuthModal();
+        await refresh();
+        startTimers();
+      } catch (e) {
+        err.textContent = 'Failed to save password preference';
+        btn.disabled = false;
+      }
+    }
+
+    async function loadAuthSettings() {
+      const statusEl = document.getElementById('settings-auth-status');
+      const controls = document.getElementById('settings-auth-controls');
+      if (!statusEl || !controls) return;
+      const st = await fetch('/api/auth/status', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}));
+      const enabled = !!st.password_enabled;
+      statusEl.textContent = enabled ? 'Password protection is enabled.' : 'Password protection is disabled. Anyone who can reach this Web UI can use it.';
+      controls.innerHTML = `
+        ${enabled ? `<div class="field settings-global-field"><div class="label">Current Password</div><input id="settings-auth-current" class="cfg mono" type="password" autocomplete="current-password"/></div>` : ''}
+        <div class="field settings-global-field"><div class="label">${enabled ? 'New Password' : 'Password'}</div><input id="settings-auth-new" class="cfg mono" type="password" autocomplete="new-password"/></div>
+        <div class="field settings-global-field"><div class="label">Confirm Password</div><input id="settings-auth-confirm" class="cfg mono" type="password" autocomplete="new-password"/></div>
+        <div class="field settings-global-field"><div class="label">Actions</div><div class="settings-cache-actions"><button class="btn-mini" id="settings-auth-save" type="button">${enabled ? 'Change Password' : 'Enable Password'}</button>${enabled ? '<button class="btn-mini" id="settings-auth-disable" type="button">Remove Password</button>' : ''}</div></div>
+        <div class="subline auth-error" id="settings-auth-error"></div>`;
+      document.getElementById('settings-auth-save')?.addEventListener('click', updatePassword);
+      document.getElementById('settings-auth-disable')?.addEventListener('click', () => updatePassword(false));
+    }
+
+    async function updatePassword(enabled = true) {
+      const error = document.getElementById('settings-auth-error');
+      const current = String(document.getElementById('settings-auth-current')?.value || '');
+      const next = String(document.getElementById('settings-auth-new')?.value || '');
+      const confirm = String(document.getElementById('settings-auth-confirm')?.value || '');
+      error.textContent = '';
+      if (enabled && next !== confirm) {
+        error.textContent = 'Passwords do not match';
+        return;
+      }
+      const r = await apiFetch('/api/auth/password', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ enabled, current_password: current, new_password: next }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        error.textContent = data.error || 'Password update failed';
+        return;
+      }
+      if (enabled) {
+        authHeader = 'Basic ' + btoa('seekarr:' + next);
+        saveAuthHeader();
+      } else {
+        clearAuthHeader();
+      }
+      passwordIsSet = enabled;
+      await loadAuthSettings();
     }
 
     async function authSubmit() {
@@ -206,7 +298,7 @@
       err.textContent = '';
       btn.disabled = true;
 
-      if (!passwordIsSet) {
+      if (!passwordIsSet && authMode === 'set-password') {
         const r = await fetch('/api/auth/bootstrap', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

@@ -1503,6 +1503,32 @@ select.cfg:focus {
   max-width: none;
 }
 
+.auth-choice[hidden],
+.auth-field[hidden] {
+  display: none !important;
+}
+
+.auth-choice .modal-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 14px;
+  gap: 10px;
+}
+
+.auth-choice .modal-actions button {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.auth-choice-note {
+  margin-top: 12px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
 .auth-inline {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

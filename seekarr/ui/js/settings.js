@@ -510,6 +510,7 @@
     async function loadSettings() {
       settingsLoaded = false;
       populateTimezoneOptions();
+      if (typeof loadAuthSettings === 'function') await loadAuthSettings();
       const r = await apiFetch('/api/settings', { cache:'no-store' });
       const data = await r.json();
       const appCfg = data.app || {};

@@ -167,7 +167,7 @@
               </div>
         ` : '';
         const runScheduleUi = `
-            <div class="settings-grid-auto">
+            <div class="settings-grid-auto settings-run-schedule-grid">
               <div class="field">
                 <div class="label">
                   Run Every (min)
@@ -214,19 +214,21 @@
               </div>
         `;
         const behaviorUi = `
-            <div class="settings-grid-auto settings-grid-spaced">
+            <div class="settings-grid-auto settings-grid-spaced settings-behavior-grid">
+              ${orderUi}
               <div class="field">
                 <div class="label">
                   Upgrade Source
                   <span class="info-icon" title="Wanted List uses the Arr upgrade queue. Monitored Items checks monitored items with existing files. Both combines both sources."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
                 <select class="cfg si_upgrade_scope" name="settings_${safe(key)}_upgrade_scope">
-                  <option value="wanted" ${upgradeScope === 'wanted' ? 'selected' : ''}>Wanted List</option>
+                  <option value="wanted" ${upgradeScope === 'wanted' ? 'selected' : ''}>Wanted List (Recommended)</option>
                   <option value="monitored" ${upgradeScope === 'monitored' ? 'selected' : ''}>Monitored Items</option>
                   <option value="both" ${upgradeScope === 'both' ? 'selected' : ''}>Both Sources</option>
                 </select>
               </div>
-              ${orderUi}
+            </div>
+            <div class="settings-grid-auto settings-behavior-limits">
               <div class="field">
                 <div class="label">Missing Per Run ${infoIcon('Maximum missing-item searches Seekarr can trigger for this instance during one scheduled run.')}</div>
                 <input class="cfg si_missing_per_run" name="settings_${safe(key)}_missing_per_run" type="number" min="0" value="${safe(inst.max_missing_actions_per_instance_per_sync)}"/>
@@ -241,17 +243,28 @@
             </div>
         `;
         const timingUi = `
-            <div class="settings-grid-auto">
+            <div class="settings-grid-auto settings-timing-grid">
+              <div class="field">
+                <div class="label">
+                  Rate Cap
+                  <span class="info-icon" title="Maximum searches this instance can trigger inside the configured rate window."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+                </div>
+                <input class="cfg si_rate_cap" name="settings_${safe(key)}_rate_cap" type="number" min="1" value="${safe(inst.rate_cap)}"/>
+              </div>
+              <div class="field">
+                <div class="label">Rate Window (min) ${infoIcon('Rolling time window used with Rate Cap to limit how many searches this instance can trigger.')}</div>
+                <input class="cfg si_rate_window" name="settings_${safe(key)}_rate_window" type="number" min="1" value="${safe(inst.rate_window_minutes)}"/>
+              </div>
+              <div class="field">
+                <div class="label">Retry (hours) ${infoIcon('Minimum hours before Seekarr will search the same movie, episode, season, or show batch again.')}</div>
+                <input class="cfg si_retry" name="settings_${safe(key)}_retry_hours" type="number" min="1" value="${safe(inst.item_retry_hours)}"/>
+              </div>
               <div class="field">
                 <div class="label">
                   Hours After Release
                   <span class="info-icon" title="Minimum hours after a title's release date before Seekarr will search for it."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
                 </div>
                 <input class="cfg si_after_release" name="settings_${safe(key)}_after_release" type="number" min="0" value="${safe(inst.min_hours_after_release)}"/>
-              </div>
-              <div class="field">
-                <div class="label">Retry (hours) ${infoIcon('Minimum hours before Seekarr will search the same movie, episode, season, or show batch again.')}</div>
-                <input class="cfg si_retry" name="settings_${safe(key)}_retry_hours" type="number" min="1" value="${safe(inst.item_retry_hours)}"/>
               </div>
               <div class="field settings-seconds-between-field${isSonarrSmartMode ? ' is-disabled' : ''}">
                 <div class="label">
@@ -260,24 +273,19 @@
                 </div>
                 <input class="cfg si_between" name="settings_${safe(key)}_seconds_between" type="number" min="0" value="${safe(inst.min_seconds_between_actions)}" ${isSonarrSmartMode ? 'disabled' : ''} aria-disabled="${isSonarrSmartMode ? 'true' : 'false'}"/>
               </div>
-              <div class="field">
-                <div class="label">Rate Window (min) ${infoIcon('Rolling time window used with Rate Cap to limit how many searches this instance can trigger.')}</div>
-                <input class="cfg si_rate_window" name="settings_${safe(key)}_rate_window" type="number" min="1" value="${safe(inst.rate_window_minutes)}"/>
-              </div>
-              <div class="field">
-                <div class="label">Rate Cap ${infoIcon('Maximum searches this instance can trigger inside the configured rate window.')}</div>
-                <input class="cfg si_rate_cap" name="settings_${safe(key)}_rate_cap" type="number" min="1" value="${safe(inst.rate_cap)}"/>
-              </div>
             </div>
         `;
         const cleanupUi = `
             <div class="settings-grid-auto settings-grid-spaced settings-cleanup-grid">
               <div class="field settings-cleanup-field">
                 <div class="label">
-                  Queue Cleanup
+                  Queue Cleanup Mode ${infoIcon('Dry Run records cleanup candidates in history without removing anything.')}
                 </div>
-                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_cleanup_enabled" name="settings_${safe(key)}_cleanup_enabled" ${cleanupEnabled ? 'checked' : ''}> Enabled <span class="info-icon" title="Applies to Arr-tracked queue items for this instance, even if Seekarr did not start them."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span></label>
-                <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_cleanup_dry_run" name="settings_${safe(key)}_cleanup_dry_run" ${cleanupDryRun ? 'checked' : ''}> Dry Run <span class="info-icon" title="Records cleanup candidates in history without removing queue items."><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span></label>
+                <select class="cfg si_cleanup_mode" name="settings_${safe(key)}_cleanup_mode">
+                  <option value="disabled" ${!cleanupEnabled ? 'selected' : ''}>Disabled</option>
+                  <option value="dry_run" ${cleanupEnabled && cleanupDryRun ? 'selected' : ''}>Dry Run</option>
+                  <option value="active" ${cleanupEnabled && !cleanupDryRun ? 'selected' : ''}>Enabled</option>
+                </select>
               </div>
               <div class="field">
                 <div class="label">
@@ -395,42 +403,26 @@
                     <h3 id="${detailId}-title">${safe(instanceName)} Settings</h3>
                     <div class="subline">${safe(inst.app).toUpperCase()} instance #${safe(inst.instance_id)}</div>
                   </div>
-                  <button class="icon-btn settings-modal-close" type="button" title="Close settings" data-close-instance-settings="1">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true">
-                      <path d="M18 6 6 18"></path>
-                      <path d="m6 6 12 12"></path>
-                    </svg>
-                  </button>
+                  <div class="settings-modal-head-actions">
+                    <div class="settings-modal-search-types" aria-label="Search types">
+                      <label class="tog subline settings-toggle-chip" title="Search for missing items"><input type="checkbox" class="si_missing" name="settings_${safe(key)}_missing" ${inst.search_missing ? 'checked' : ''}> Missing</label>
+                      <label class="tog subline settings-toggle-chip" title="Search for upgrades"><input type="checkbox" class="si_cutoff" name="settings_${safe(key)}_cutoff" ${inst.search_cutoff_unmet ? 'checked' : ''}> Upgrades</label>
+                    </div>
+                    <button class="icon-btn settings-modal-close" type="button" title="Close settings" data-close-instance-settings="1">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true">
+                        <path d="M18 6 6 18"></path>
+                        <path d="m6 6 12 12"></path>
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-	              <div class="settings-panel">
-	                <div class="settings-panel-copy">
-	                  <h4 class="settings-panel-title">Search Types</h4>
-	                  <div class="subline settings-panel-help">Choose which search types this instance can run.</div>
-	                </div>
-	                <div class="settings-panel-body">
-	                  <div class="pill-row settings-toggle-group">
-		                    <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_missing" name="settings_${safe(key)}_missing" ${inst.search_missing ? 'checked' : ''}> Missing ${infoIcon('Allow this instance to search for missing movies or episodes.')}</label>
-		                    <label class="tog subline settings-toggle-chip"><input type="checkbox" class="si_cutoff" name="settings_${safe(key)}_cutoff" ${inst.search_cutoff_unmet ? 'checked' : ''}> Upgrades ${infoIcon('Allow this instance to search for cutoff-unmet or monitored upgrade candidates, depending on Upgrade Source.')}</label>
-	                  </div>
+                <div class="settings-modal-priority">
+                  <div class="settings-modal-priority-copy">
+                    <h4 class="settings-panel-title">Run Schedule</h4>
+                    <div class="subline settings-panel-help">How often Seekarr checks this instance automatically.</div>
+                  </div>
+                  <div class="settings-modal-priority-control">${runScheduleUi}</div>
                 </div>
-              </div>
-
-              <div class="settings-panel">
-                <div class="settings-panel-copy">
-                  <h4 class="settings-panel-title">Run Schedule</h4>
-                  <div class="subline settings-panel-help">How often Seekarr checks this instance automatically.</div>
-                </div>
-                <div class="settings-panel-body">${runScheduleUi}</div>
-              </div>
-
-              <div class="settings-panel">
-                <div class="settings-panel-copy">
-                  <h4 class="settings-panel-title">Sleep Window</h4>
-                  <div class="subline settings-panel-help">Pause scheduled runs during quiet hours.</div>
-                </div>
-                <div class="settings-panel-body">${sleepWindowUi}</div>
-              </div>
-
               <div class="settings-panel">
                 <div class="settings-panel-copy">
                   <h4 class="settings-panel-title">Search Behavior</h4>
@@ -445,6 +437,14 @@
                   <div class="subline settings-panel-help">Control release delay, retries, and request pacing.</div>
                 </div>
                 <div class="settings-panel-body">${timingUi}</div>
+              </div>
+
+              <div class="settings-panel">
+                <div class="settings-panel-copy">
+                  <h4 class="settings-panel-title">Sleep Window</h4>
+                  <div class="subline settings-panel-help">Pause scheduled runs during quiet hours.</div>
+                </div>
+                <div class="settings-panel-body">${sleepWindowUi}</div>
               </div>
 
               <div class="settings-panel">
@@ -510,6 +510,7 @@
     async function loadSettings() {
       settingsLoaded = false;
       populateTimezoneOptions();
+      if (typeof loadAuthSettings === 'function') await loadAuthSettings();
       const r = await apiFetch('/api/settings', { cache:'no-store' });
       const data = await r.json();
       const appCfg = data.app || {};

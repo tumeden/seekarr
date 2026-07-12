@@ -20,7 +20,15 @@
           <div class="auth-panel-copy" id="auth-sub">Enter your Web UI password.</div>
         </div>
         <div class="modal-body">
-          <div class="field auth-field">
+          <div id="auth-choice" class="auth-choice" hidden>
+            <div class="subline">Choose whether this Web UI should require a password.</div>
+            <div class="modal-actions">
+              <button class="btn-secondary" id="auth-no-password" type="button">No Password</button>
+              <button class="btn-primary" id="auth-use-password" type="button">Use Password</button>
+            </div>
+            <div class="subline auth-choice-note">You can change this later in Configuration.</div>
+          </div>
+          <div class="field auth-field" id="auth-password-form">
             <div class="label" id="auth-label">Password</div>
             <div class="auth-inline">
               <input class="cfg mono" id="auth-password" name="seekarr_webui_password" type="password" value=""
@@ -29,7 +37,7 @@
             </div>
             <div class="subline auth-field-hint" id="auth-hint"></div>
           </div>
-          <div class="subline auth-error" id="auth-error"></div>
+            <div class="subline auth-error" id="auth-error"></div>
         </div>
       </div>
     </div>
@@ -48,7 +56,7 @@
         <div class="subline" style="margin-top:12px; color:rgba(254, 202, 202, 0.92);">
           This removes the instance configuration, stored API key, schedule state, and instance-specific history.
         </div>
-        <div class="field" style="margin-top:16px;">
+        <div class="field" id="delete-instance-password-field" style="margin-top:16px;">
           <div class="label">Current Web UI Password</div>
           <input
             class="cfg mono"
@@ -256,6 +264,14 @@
               <div class="subline settings-global-help">
                 Cached images are stored beside the database and cleaned when they age out or are no longer referenced by search history.
               </div>
+            </div>
+
+            <div class="settings-global-section settings-global-preferences">
+              <div class="settings-global-preferences-copy">
+                <h4>Web UI Password</h4>
+                <div class="subline" id="settings-auth-status">Loading password settings...</div>
+              </div>
+              <div class="settings-global-preferences-grid" id="settings-auth-controls"></div>
             </div>
           </div>
           

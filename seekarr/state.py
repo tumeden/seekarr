@@ -107,6 +107,7 @@ class StateStore:
                 CREATE TABLE IF NOT EXISTS webui_auth (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     password_hash TEXT NOT NULL,
+                    auth_mode TEXT NOT NULL DEFAULT 'password',
                     updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS ui_app_settings (
@@ -193,6 +194,9 @@ class StateStore:
             ):
                 if col not in cols:
                     conn.execute(f"ALTER TABLE ui_instance_settings ADD COLUMN {col} INTEGER")
+            auth_cols = {row["name"] for row in conn.execute("PRAGMA table_info(webui_auth)").fetchall()}
+            if "auth_mode" not in auth_cols:
+                conn.execute("ALTER TABLE webui_auth ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'password'")
 
     def get_webui_password_hash(self) -> str | None:
         with self._connect() as conn:
@@ -202,15 +206,35 @@ class StateStore:
         value = str(row["password_hash"] or "").strip()
         return value or None
 
+    def get_webui_auth_mode(self) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT auth_mode FROM webui_auth WHERE id = 1").fetchone()
+        if not row:
+            return None
+        mode = str(row["auth_mode"] or "password").strip().lower()
+        return mode if mode in ("password", "none") else "password"
+
     def set_webui_password_hash(self, password_hash: str) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO webui_auth(id, password_hash, updated_at)
-                VALUES(1, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET password_hash=excluded.password_hash, updated_at=excluded.updated_at
+                INSERT INTO webui_auth(id, password_hash, auth_mode, updated_at)
+                VALUES(1, ?, 'password', ?)
+                ON CONFLICT(id) DO UPDATE SET password_hash=excluded.password_hash,
+                    auth_mode='password', updated_at=excluded.updated_at
                 """,
                 (str(password_hash), _utc_now()),
+            )
+
+    def set_webui_auth_disabled(self) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO webui_auth(id, password_hash, auth_mode, updated_at)
+                VALUES(1, '', 'none', ?)
+                ON CONFLICT(id) DO UPDATE SET password_hash='', auth_mode='none', updated_at=excluded.updated_at
+                """,
+                (_utc_now(),),
             )
 
     def is_guid_processed(self, hunt_type: str, instance_id: int, guid: str) -> bool:

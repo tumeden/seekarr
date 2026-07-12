@@ -24,6 +24,54 @@ def test_is_newer_version() -> None:
     assert _is_newer_version("1.3.0", "1.2.9") is False
 
 
+def test_first_run_can_disable_password_and_remembers_choice(tmp_path) -> None:
+    app = create_app(str(tmp_path / "seekarr.db"))
+    client = app.test_client()
+
+    status = client.get("/api/auth/status")
+    assert status.get_json() == {"password_set": False, "auth_configured": False, "password_enabled": False}
+
+    bootstrap = client.post("/api/auth/bootstrap", json={"password_enabled": False})
+    assert bootstrap.status_code == 200
+    assert client.get("/api/auth/status").get_json() == {
+        "password_set": False,
+        "auth_configured": True,
+        "password_enabled": False,
+    }
+    assert client.get("/api/status").status_code == 200
+
+
+def test_password_can_be_enabled_changed_and_removed(tmp_path) -> None:
+    app = create_app(str(tmp_path / "seekarr.db"))
+    client = app.test_client()
+    assert client.post("/api/auth/bootstrap", json={"password_enabled": False}).status_code == 200
+
+    enabled = client.post(
+        "/api/auth/password",
+        json={"enabled": True, "new_password": "password123"},
+    )
+    assert enabled.status_code == 200
+    assert client.get("/api/status").status_code == 401
+    assert client.get("/api/status", headers={"X-Seekarr-Password": "password123"}).status_code == 200
+
+    changed = client.post(
+        "/api/auth/password",
+        headers={"X-Seekarr-Password": "password123"},
+        json={"enabled": True, "current_password": "password123", "new_password": "password456"},
+    )
+    assert changed.status_code == 200
+    assert client.get("/api/status", headers={"X-Seekarr-Password": "password123"}).status_code == 401
+    assert client.get("/api/status", headers={"X-Seekarr-Password": "password456"}).status_code == 200
+
+    removed = client.post(
+        "/api/auth/password",
+        headers={"X-Seekarr-Password": "password456"},
+        json={"enabled": False, "current_password": "password456"},
+    )
+    assert removed.status_code == 200
+    assert client.get("/api/status").status_code == 200
+
+
 def test_webui_shell_and_assets_are_served(tmp_path) -> None:
     app = create_app(str(tmp_path / "seekarr.db"))
     client = app.test_client()

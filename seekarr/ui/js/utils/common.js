@@ -244,6 +244,7 @@
         if (parts.length < 2) return;
         const app = parts[0];
         const instance_id = Number(parts[1] || 0);
+        const cleanupMode = String(tr.querySelector('.si_cleanup_mode')?.value || 'disabled');
         instances.push({
           app,
           instance_id,
@@ -265,8 +266,8 @@
           item_retry_hours: Number(tr.querySelector('.si_retry')?.value || 0),
           rate_window_minutes: Number(tr.querySelector('.si_rate_window')?.value || 0),
           rate_cap: Number(tr.querySelector('.si_rate_cap')?.value || 0),
-          cleanup_enabled: !!tr.querySelector('.si_cleanup_enabled')?.checked,
-          cleanup_dry_run: !!tr.querySelector('.si_cleanup_dry_run')?.checked,
+          cleanup_enabled: cleanupMode !== 'disabled',
+          cleanup_dry_run: cleanupMode === 'dry_run',
           cleanup_stuck_hours: Number(tr.querySelector('.si_cleanup_stuck_hours')?.value || 24),
           cleanup_require_issue: !!tr.querySelector('.si_cleanup_require_issue')?.checked,
           cleanup_remove_from_client: !!tr.querySelector('.si_cleanup_remove_client')?.checked,

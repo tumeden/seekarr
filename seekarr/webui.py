@@ -530,18 +530,21 @@ def create_app(db_path: str | None = None) -> Flask:
         return digest.hexdigest()[:16]
 
     password_hash = store.get_webui_password_hash()
+    auth_mode = store.get_webui_auth_mode()
 
     def _json_unauthorized(msg: str = "Unauthorized") -> Any:
         return jsonify({"error": msg}), 401
 
     @app.before_request
     def _auth() -> Any:
-        nonlocal password_hash
+        nonlocal password_hash, auth_mode
         if not request.path.startswith("/api/"):
             return None
         if request.path in ("/api/auth/status", "/api/auth/bootstrap"):
             return None
-        if not password_hash:
+        if auth_mode == "none":
+            return None
+        if auth_mode != "password" or not password_hash:
             return _json_unauthorized("Web UI password not set")
 
         auth = request.headers.get("Authorization", "")
@@ -560,20 +563,54 @@ def create_app(db_path: str | None = None) -> Flask:
 
     @app.get("/api/auth/status")
     def auth_status() -> Any:
-        return jsonify({"password_set": bool(password_hash)})
+        password_set = auth_mode == "password" and bool(password_hash)
+        return jsonify(
+            {
+                "password_set": password_set,
+                "auth_configured": auth_mode in ("password", "none"),
+                "password_enabled": password_set,
+            }
+        )
 
     @app.post("/api/auth/bootstrap")
     def auth_bootstrap() -> Any:
-        nonlocal password_hash
-        if password_hash:
+        nonlocal password_hash, auth_mode
+        if auth_mode is not None:
             return jsonify({"error": "Password already set"}), 409
         payload = request.get_json(silent=True) or {}
+        if payload.get("password_enabled") is False:
+            store.set_webui_auth_disabled()
+            password_hash = None
+            auth_mode = "none"
+            return jsonify({"ok": True, "password_set": False})
         pw = str(payload.get("password") or "").strip()
         if len(pw) < 8:
             return jsonify({"error": "Password must be at least 8 characters"}), 400
         password_hash = _hash_password(pw)
         store.set_webui_password_hash(password_hash)
-        return jsonify({"ok": True})
+        auth_mode = "password"
+        return jsonify({"ok": True, "password_set": True})
+
+    @app.post("/api/auth/password")
+    def update_auth_password() -> Any:
+        nonlocal password_hash, auth_mode
+        payload = request.get_json(silent=True) or {}
+        enabled = bool(payload.get("enabled", True))
+        current_password = str(payload.get("current_password") or "")
+        if auth_mode == "password" and (not password_hash or not _verify_password(current_password, password_hash)):
+            return jsonify({"error": "Current password is incorrect"}), 403
+        if not enabled:
+            store.set_webui_auth_disabled()
+            password_hash = None
+            auth_mode = "none"
+            return jsonify({"ok": True, "password_set": False})
+        new_password = str(payload.get("new_password") or "").strip()
+        if len(new_password) < 8:
+            return jsonify({"error": "Password must be at least 8 characters"}), 400
+        password_hash = _hash_password(new_password)
+        store.set_webui_password_hash(password_hash)
+        auth_mode = "password"
+        return jsonify({"ok": True, "password_set": True})
 
     @app.post("/api/credentials/clear")
     def clear_credentials() -> Any:
@@ -599,7 +636,7 @@ def create_app(db_path: str | None = None) -> Flask:
             instance_id = 0
         if app_type not in ("radarr", "sonarr") or instance_id <= 0:
             return jsonify({"error": "Invalid instance"}), 400
-        if not password_hash or not _verify_password(confirm_password, password_hash):
+        if auth_mode == "password" and (not password_hash or not _verify_password(confirm_password, password_hash)):
             return jsonify({"error": "Password confirmation failed"}), 403
         try:
             store.delete_instance(app_type, instance_id)
